@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: barakah-screen
+    runtime: python
+    buildCommand: "true"
+    startCommand: python server.py
+    plan: free
