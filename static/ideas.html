@@ -93,8 +93,34 @@
 const $ = (id) => document.getElementById(id);
 let prevScore = {};
 let firstLoad = true;
+function saveFilters() {
+  localStorage.setItem("barakahFilters", JSON.stringify({
+    maxPrice: $("maxPrice").value,
+    minPrice: $("minPrice").value,
+    verdict: $("verdict").value,
+    tf: $("tf").value,
+    live: $("live").checked,
+  }));
+}
+function loadFilters() {
+  try {
+    const f = JSON.parse(localStorage.getItem("barakahFilters") || "null");
+    if (!f) return;
+    if (f.maxPrice != null) $("maxPrice").value = f.maxPrice;
+    if (f.minPrice != null) $("minPrice").value = f.minPrice;
+    if (f.verdict) $("verdict").value = f.verdict;
+    if (f.tf) $("tf").value = f.tf;
+    if (typeof f.live === "boolean") $("live").checked = f.live;
+  } catch (e) {}
+}
+loadFilters();
+["maxPrice","minPrice","verdict","tf","live"].forEach((id) => {
+  $(id).addEventListener("change", saveFilters);
+  $(id).addEventListener("input", saveFilters);
+});
 function pill(v){ return `<span class="pill ${v||"REVIEW"}">${v||"—"}</span>`; }
 $("go").onclick = async () => {
+  saveFilters();
   const max = $("maxPrice").value, min = $("minPrice").value, v = $("verdict").value, tf = $("tf").value;
   if (firstLoad) $("list").innerHTML = `<div class="empty">Scoring ${tf} bars…</div>`;
   const r = await fetch(`/api/ideas?max_price=${encodeURIComponent(max)}&min_price=${encodeURIComponent(min)}&verdict=${encodeURIComponent(v)}&tf=${encodeURIComponent(tf)}&_=${Date.now()}`).then(x=>x.json());

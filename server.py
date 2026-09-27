@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
+UNIVERSE = STATIC / "universe.json"
 
 UA = "BarakahScreen/1.0 (self-hosted educational screener; research@example.com)"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -70,27 +71,43 @@ QUESTIONABLE_KEYWORDS = [
 STANDARDS = {
     "AAOIFI": {
         "label": "AAOIFI (Std. 21 style)",
-        "debt_max": 0.30,
-        "cash_max": 0.30,
-        "recv_max": None,
-        "impure_max": 0.05,
-        "denom": "market_cap",
+        "debt_max": 0.30, "cash_max": 0.30, "recv_max": None,
+        "impure_max": 0.05, "denom": "market_cap",
     },
-    "MSCI": {
-        "label": "MSCI Islamic (assets)",
-        "debt_max": 0.3333,
-        "cash_max": 0.3333,
-        "recv_max": 0.3333,
-        "impure_max": 0.05,
-        "denom": "assets",
+    "SP": {
+        "label": "S&P Shariah style",
+        "debt_max": 0.33, "cash_max": 0.33, "recv_max": 0.49,
+        "impure_max": 0.05, "denom": "market_cap", "recv_denom": "market_cap",
     },
     "DJIM": {
-        "label": "DJIM style (mkt cap)",
-        "debt_max": 0.33,
-        "cash_max": 0.33,
-        "recv_max": 0.33,
-        "impure_max": 0.05,
-        "denom": "market_cap",
+        "label": "Dow Jones Islamic style",
+        "debt_max": 0.33, "cash_max": 0.33, "recv_max": 0.33,
+        "impure_max": 0.05, "denom": "market_cap",
+    },
+    "FTSE": {
+        "label": "FTSE Shariah style",
+        "debt_max": 0.3333, "cash_max": 0.3333, "recv_max": 0.50,
+        "impure_max": 0.05, "denom": "assets",
+    },
+    "MSCI": {
+        "label": "MSCI Islamic style",
+        "debt_max": 0.3333, "cash_max": 0.3333, "recv_max": 0.3333,
+        "impure_max": 0.05, "denom": "assets",
+    },
+    "RAJHI": {
+        "label": "Al Rajhi style (AAOIFI-like)",
+        "debt_max": 0.30, "cash_max": 0.30, "recv_max": None,
+        "impure_max": 0.05, "denom": "market_cap",
+    },
+    "ALINMA": {
+        "label": "Alinma style",
+        "debt_max": 0.33, "cash_max": 0.33, "recv_max": None,
+        "impure_max": 0.05, "denom": "market_cap",
+    },
+    "BILAD": {
+        "label": "Bank Albilad style",
+        "debt_max": 0.30, "cash_max": 0.30, "recv_max": 0.49,
+        "impure_max": 0.05, "denom": "market_cap", "recv_denom": "market_cap",
     },
 }
 
@@ -534,8 +551,80 @@ def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     }
 
 
+def load_universe():
+    if not UNIVERSE.exists():
+        return None
+    try:
+        data = json.loads(UNIVERSE.read_text(encoding="utf-8"))
+        return data
+    except Exception:
+        return None
+
+
+def export_universe(symbols=None):
+    symbols = symbols or WATCHLIST
+    rows = []
+    for i, s in enumerate(symbols, 1):
+        print(f"[{i}/{len(symbols)}] {s}")
+        try:
+            sc = screen_symbol(s)
+            rows.append({
+                "ok": sc.get("ok"),
+                "symbol": sc.get("symbol", s),
+                "name": sc.get("name"),
+                "overall": sc.get("overall"),
+                "aaoifi": (sc.get("standards") or {}).get("AAOIFI", {}).get("verdict"),
+                "msci": (sc.get("standards") or {}).get("MSCI", {}).get("verdict"),
+                "sp": (sc.get("standards") or {}).get("SP", {}).get("verdict"),
+                "djim": (sc.get("standards") or {}).get("DJIM", {}).get("verdict"),
+                "ftse": (sc.get("standards") or {}).get("FTSE", {}).get("verdict"),
+                "rajhi": (sc.get("standards") or {}).get("RAJHI", {}).get("verdict"),
+                "alinma": (sc.get("standards") or {}).get("ALINMA", {}).get("verdict"),
+                "bilad": (sc.get("standards") or {}).get("BILAD", {}).get("verdict"),
+                "price": sc.get("price"),
+                "change_pct": sc.get("change_pct"),
+                "market_cap": sc.get("market_cap"),
+                "business": (sc.get("business") or {}).get("status"),
+                "error": sc.get("error"),
+            })
+        except Exception as e:
+            rows.append({"ok": False, "symbol": s, "error": str(e)})
+        time.sleep(0.12)
+    payload = {
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "count": len(rows),
+        "rows": rows,
+        "note": "Weekly PC export. Public site should filter this file and not re-hit SEC.",
+    }
+    UNIVERSE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    (CACHE / "universe.json").write_text(json.dumps(payload), encoding="utf-8")
+    print("Wrote", UNIVERSE)
+    return payload
+
+
+def filter_universe_rows(rows, max_price, min_price, allow):
+    out = []
+    for sc in rows:
+        if not sc.get("ok") and sc.get("overall") is None:
+            continue
+        v = sc.get("overall")
+        if allow and "ALL" not in allow and v not in allow:
+            continue
+        px = sc.get("price")
+        if px is not None:
+            if min_price is not None and px < min_price:
+                continue
+            if max_price is not None and px > max_price:
+                continue
+        out.append(sc)
+    return out
+
+
 def daily_eligible(max_price, min_price, allow):
-    """Halal + price universe, cached most of the day so live ranking only hits charts."""
+    """Halal + price universe. Prefer weekly static/universe.json."""
+    snap = load_universe()
+    if snap and snap.get("rows"):
+        return filter_universe_rows(snap["rows"], max_price, min_price, allow)
 
     def fetch():
         rows = []
@@ -696,7 +785,12 @@ def screen_symbol(symbol: str) -> dict:
         denom = market_cap if std["denom"] == "market_cap" else assets_val
         debt_r = ratio(debt_val, denom)
         cash_r = ratio(cash_val if cash or securities else None, denom)
-        recv_r = ratio((recv_val or 0) + (cash["val"] if cash else 0), assets_val) if std["recv_max"] is not None else None
+        if std.get("recv_max") is None:
+            recv_r = None
+        elif std.get("recv_denom") == "market_cap" or (std["denom"] == "market_cap" and std.get("recv_denom") != "assets"):
+            recv_r = ratio(recv_val, market_cap)
+        else:
+            recv_r = ratio((recv_val or 0) + (cash["val"] if cash else 0), assets_val)
         checks = []
 
         def add(name, val, cap, ok_if_missing=False):
@@ -801,7 +895,33 @@ class Handler(SimpleHTTPRequestHandler):
         q = urllib.parse.parse_qs(parsed.query)
 
         if path == "/api/health":
-            return self._json({"ok": True, "watchlist": len(WATCHLIST)})
+            snap = load_universe()
+            return self._json({
+                "ok": True,
+                "watchlist": len(WATCHLIST),
+                "universe": bool(snap),
+                "universe_at": (snap or {}).get("created_at"),
+                "universe_count": (snap or {}).get("count"),
+            })
+
+        if path == "/api/universe":
+            snap = load_universe()
+            if not snap:
+                return self._json({"ok": False, "error": "No static/universe.json. Run weekly export on your PC."}, 404)
+            max_price = q.get("max_price", [""])[0]
+            min_price = q.get("min_price", [""])[0]
+            try:
+                max_price = float(max_price) if max_price else None
+            except ValueError:
+                max_price = None
+            try:
+                min_price = float(min_price) if min_price else 0.0
+            except ValueError:
+                min_price = 0.0
+            allowed = (q.get("verdict") or ["ALL"])[0].upper()
+            allow = {x.strip() for x in allowed.split(",") if x.strip()}
+            rows = filter_universe_rows(snap.get("rows") or [], max_price, min_price, allow)
+            return self._json({"ok": True, "created_at": snap.get("created_at"), "results": rows, "count": len(rows)})
 
         if path == "/api/watchlist":
             return self._json({"symbols": WATCHLIST})
@@ -828,6 +948,27 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"ok": False, "symbol": sym.upper(), "error": str(e)}, 500)
 
         if path == "/api/batch":
+            snap = load_universe()
+            if snap and snap.get("rows") and not (q.get("symbols") or [""])[0].strip():
+                max_price = q.get("max_price", [""])[0]
+                min_price = q.get("min_price", [""])[0]
+                try:
+                    max_price = float(max_price) if max_price else None
+                except ValueError:
+                    max_price = None
+                try:
+                    min_price = float(min_price) if min_price else None
+                except ValueError:
+                    min_price = None
+                allowed = (q.get("verdict") or ["ALL"])[0].upper()
+                allow = {x.strip() for x in allowed.split(",") if x.strip()}
+                rows = filter_universe_rows(snap["rows"], max_price, min_price, allow)
+                return self._json({
+                    "results": rows,
+                    "count": len(rows),
+                    "source": "weekly-universe",
+                    "created_at": snap.get("created_at"),
+                })
             syms = [s.strip().upper() for s in (q.get("symbols") or [","])[0].split(",") if s.strip()]
             if not syms:
                 syms = WATCHLIST
@@ -909,8 +1050,16 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] in ("--export", "export"):
+        extra = [s.strip().upper() for s in sys.argv[2:] if s.strip()]
+        export_universe(extra or WATCHLIST)
+        return
     port = int(os.environ.get("PORT", "8787"))
     print(f"Halal screener → http://127.0.0.1:{port}")
+    snap = load_universe()
+    if snap:
+        print("Weekly table:", snap.get("created_at"), "rows", snap.get("count"))
     print("Warming SEC ticker map…")
     try:
         n = len(load_tickers())
