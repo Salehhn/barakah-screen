@@ -650,25 +650,52 @@ def fetch_etf_holdings():
 
 def export_from_etfs():
     payload = fetch_etf_holdings()
+    payload["rows"] = enrich_prices(payload.get("rows") or [])
     UNIVERSE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print("Wrote", UNIVERSE, "rows", payload["count"])
     return payload
 
 
-def enrich_prices(rows, limit=20):
-    for row in rows[:limit]:
-        if row.get("price") is not None:
-            continue
+def yahoo_quotes_batch(symbols):
+    out = {}
+    ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    symbols = [s for s in symbols if s]
+    for i in range(0, len(symbols), 40):
+        chunk = symbols[i:i + 40]
+        url = "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" + urllib.parse.quote(",".join(chunk))
         try:
-            q = yahoo_price(row.get("symbol") or "")
-            if q.get("price") is not None:
-                row["price"] = q.get("price")
-                row["change_pct"] = q.get("change_pct")
-                if q.get("name"):
-                    row["name"] = q.get("name")
+            raw = json.loads(http_get_ua(url, ua, timeout=20))
+            for q in (raw.get("quoteResponse") or {}).get("result") or []:
+                sym = (q.get("symbol") or "").upper().replace(".", "-")
+                out[sym] = {
+                    "price": q.get("regularMarketPrice"),
+                    "change_pct": q.get("regularMarketChangePercent"),
+                    "name": q.get("shortName") or q.get("longName") or sym,
+                }
         except Exception:
-            pass
-        time.sleep(0.05)
+            for s in chunk:
+                try:
+                    one = yahoo_price(s)
+                    if one.get("price") is not None:
+                        out[s] = one
+                except Exception:
+                    pass
+                time.sleep(0.03)
+    return out
+
+
+def enrich_prices(rows, limit=400):
+    missing = [r.get("symbol") for r in rows[:limit] if r.get("price") is None and r.get("symbol")]
+    quotes = yahoo_quotes_batch(missing) if missing else {}
+    for row in rows:
+        q = quotes.get((row.get("symbol") or "").upper())
+        if not q:
+            continue
+        if q.get("price") is not None:
+            row["price"] = q.get("price")
+            row["change_pct"] = q.get("change_pct")
+            if q.get("name"):
+                row["name"] = q.get("name")
     return rows
 
 
