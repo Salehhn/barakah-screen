@@ -1150,6 +1150,12 @@ class Handler(SimpleHTTPRequestHandler):
         if path in ("/api/ideas", "/api/batch", "/api/universe", "/"):
             refresh_etf_universe_async(False)
 
+        if path == "/api/tape":
+            try:
+                return self._json({"ok": True, **market_tape()})
+            except Exception as e:
+                return self._json({"ok": False, "buyers": 50, "sellers": 50, "label": "Tape unavailable", "stance": str(e)})
+
         if path == "/api/health":
             snap = load_universe()
             return self._json({
