@@ -1,8 +1,0 @@
-# Optional extra tickers (HLAL / UMMA names you want included). One per line.
-# Example US / ADR names often in those funds:
-TSM
-ASML
-AZN
-NVO
-SAP
-NESTLE
