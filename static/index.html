@@ -198,13 +198,14 @@ async function searchSuggest() {
 
 async function screenOne(sym) {
   if (!sym) return;
-  $("detail").innerHTML = `<div class="empty">Screening ${sym} from SEC + price feed…</div>`;
+  const keep = $("detail").innerHTML;
   try {
     const r = await fetch("/api/screen?symbol=" + encodeURIComponent(sym)).then(x => x.json());
     lastDetail = r;
-    renderDetail(r, "AAOIFI");
+    if (r && r.ok) renderDetail(r, "AAOIFI");
+    else $("detail").innerHTML = keep + `<p class="note">${(r&&r.error)||"SEC still busy. ETF row above is enough to start. Try full file in a minute."}</p>`;
   } catch (e) {
-    $("detail").innerHTML = `<p class="note">Could not open ${sym}: ${e}</p>`;
+    $("detail").innerHTML = keep + `<p class="note">${e}</p>`;
   }
 }
 
@@ -310,14 +311,31 @@ function applyFilters() {
       <td class="hide-sm">${(x.etfs||[]).join(" ")||x.source||""}</td>
     </tr>`).join("")}</tbody></table>`;
   $("tableWrap").querySelectorAll("tr[data-sym]").forEach(tr => {
-    tr.onclick = () => screenOne(tr.dataset.sym);
+    tr.onclick = () => {
+      const row = lastResults.find(x => x.symbol === tr.dataset.sym) || {symbol: tr.dataset.sym};
+      showQuick(row);
+      screenOne(tr.dataset.sym);
+    };
   });
+}
+
+function showQuick(x) {
+  $("detail").innerHTML = `
+    <p class="hero-name">${x.symbol || ""}</p>
+    <div class="meta">${x.name || ""} · last ${x.price!=null?("$"+Number(x.price).toFixed(2)):"—"}
+      · ${(x.etfs||[]).join(", ") || x.source || "ready list"}</div>
+    <div>${pill(x.overall)} ${x.aaoifi?pill(x.aaoifi):""}</div>
+    <p class="note">Ready instantly from the ETF table. Full SEC boards load behind this — no need to wait before reading.</p>`;
 }
 
 async function runBatch() {
   $("tableWrap").innerHTML = `<div class="empty">Loading ready ETF / weekly table…</div>`;
   let r = await fetch("/api/universe?verdict=ALL").then(x => x.json()).catch(() => null);
-  if (!r || !r.ok) r = await fetch("/api/batch").then(x => x.json());
+  if (!r || !r.ok) {
+    $("tableWrap").innerHTML = `<div class="empty">${(r && r.error) || "Ready list is still building. Wait 30s and click Load ready list again."}</div>`;
+    lastResults = [];
+    return;
+  }
   lastResults = r.results || [];
   $("filterStatus").textContent = r.created_at
     ? `Ready table ${r.created_at} · ${lastResults.length} names · ${r.source || "universe"}`
