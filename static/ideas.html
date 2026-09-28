@@ -97,6 +97,11 @@
   </header>
   <main>
     <div id="status" class="meta"></div>
+    <div id="paper" class="tape-box">
+      <div class="meta"><b>Paper results</b> · 100 shares of #1 if tape healthy at the open · not a real order</div>
+      <div class="meta" id="paperSum">No closed trades yet.</div>
+      <div id="paperTbl"></div>
+    </div>
     <div id="list" class="empty">Set max price (e.g. 30) and click Rank setups.</div>
     <p class="note">Educational only. No riba/margin. Re-check the 10-K and your scholar’s standard before buying. US market hours affect volume/RSI quality.</p>
   </main>
@@ -164,6 +169,23 @@ $("go").onclick = async () => {
   $("sellFill").textContent = "SELLERS " + s + "%";
   $("tapeLab").textContent = (m.label || "Tape") + " · " + (m.stance || "") + " · last session is fine when US is closed";
   $("status").textContent = `Top ${top.length} · day-trade rank (daily trend + ${tf} bars)`;
+  const p = r.paper || {};
+  const trs = p.trades || [];
+  const op = p.open;
+  $("paperSum").textContent = "Cumulative $ " + (p.cumulative != null ? p.cumulative : 0)
+    + (op ? " · OPEN " + op.symbol + " @ " + op.open_price : "")
+    + (p.skipped ? " · " + p.skipped : "");
+  if (trs.length) {
+    $("paperTbl").innerHTML = `<table class="board"><thead><tr>
+      <th>Date</th><th>Symbol</th><th>Open</th><th>Close</th><th>Exit</th><th>$</th></tr></thead><tbody>
+      ${trs.slice().reverse().map(t => `<tr>
+        <td>${t.date||""}</td><td>${t.symbol||""}</td>
+        <td>${t.open_price!=null?("$"+Number(t.open_price).toFixed(2)):""}</td>
+        <td>${t.close_price!=null?("$"+Number(t.close_price).toFixed(2)):""}</td>
+        <td>${t.exit||""}</td>
+        <td>${t.pnl!=null?("$"+Number(t.pnl).toFixed(2)):""}</td>
+      </tr>`).join("")}</tbody></table>`;
+  }
   if (!top.length) {
     $("list").innerHTML = `<div class="empty">No halal names matched. Raise max price or use PASS + REVIEW.</div>`;
     return;
