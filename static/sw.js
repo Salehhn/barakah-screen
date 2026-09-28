@@ -1,4 +1,4 @@
-const CACHE = "barakah-v3";
+const CACHE = "barakah-v5";
 const ASSETS = ["/", "/index.html", "/ideas.html", "/manifest.json", "/icon.svg"];
 
 self.addEventListener("install", (e) => {

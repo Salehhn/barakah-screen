@@ -126,7 +126,7 @@
       <section class="card">
         <div class="toolbar">
           <h2 style="margin:0;flex:1">Watchlist screen</h2>
-          <button class="ghost" id="runBatch">Screen watchlist</button>
+          <button class="ghost" id="runBatch">Load ready list</button>
         </div>
         <div class="filters">
           <label>Max price $
@@ -151,7 +151,7 @@
           </label>
         </div>
         <div id="filterStatus" class="meta"></div>
-        <div id="tableWrap" class="empty">Set filters (example: PASS and price under $30), then Screen watchlist. First run is slow.</div>
+        <div id="tableWrap" class="empty">Load ready list (ETF holdings). Filters apply instantly. Click a row for the 8-board detail.</div>
       </section>
       <section class="card" id="detail">
         <div class="empty">Pick a stock to see ratios, business screen, and purification proxy.</div>
@@ -273,8 +273,6 @@ function applyFilters() {
     if (x.price != null) {
       if (!Number.isNaN(minP) && x.price < minP) return false;
       if (!Number.isNaN(maxP) && x.price > maxP) return false;
-    } else if (allowed !== "ALL") {
-      return false;
     }
     if (allowed !== "ALL") {
       const v = verdictOf(x);
@@ -292,7 +290,7 @@ function applyFilters() {
     return;
   }
   $("tableWrap").innerHTML = `<table>
-    <thead><tr><th>Ticker</th><th>Name</th><th>Price</th><th>Overall</th><th class="hide-sm">AAOIFI</th><th class="hide-sm">MSCI</th></tr></thead>
+    <thead><tr><th>Ticker</th><th>Name</th><th>Price</th><th>Overall</th><th class="hide-sm">AAOIFI</th><th class="hide-sm">MSCI</th><th class="hide-sm">ETF</th></tr></thead>
     <tbody>${rows.map(x => `
     <tr data-sym="${x.symbol}">
       <td><b>${x.symbol}</b></td>
@@ -301,6 +299,7 @@ function applyFilters() {
       <td>${pill(x.overall || (x.error ? "FAIL" : "REVIEW"))}</td>
       <td class="hide-sm">${pill(x.aaoifi)}</td>
       <td class="hide-sm">${pill(x.msci)}</td>
+      <td class="hide-sm">${(x.etfs||[]).join(" ")||x.source||""}</td>
     </tr>`).join("")}</tbody></table>`;
   $("tableWrap").querySelectorAll("tr[data-sym]").forEach(tr => {
     tr.onclick = () => screenOne(tr.dataset.sym);
@@ -308,11 +307,16 @@ function applyFilters() {
 }
 
 async function runBatch() {
-  $("tableWrap").innerHTML = `<div class="empty">Screening watchlist (first run is slow; then cached)…</div>`;
-  const r = await fetch("/api/batch").then(x => x.json());
+  $("tableWrap").innerHTML = `<div class="empty">Loading ready ETF / weekly table…</div>`;
+  let r = await fetch("/api/universe?verdict=ALL").then(x => x.json()).catch(() => null);
+  if (!r || !r.ok) r = await fetch("/api/batch").then(x => x.json());
   lastResults = r.results || [];
+  $("filterStatus").textContent = r.created_at
+    ? `Ready table ${r.created_at} · ${lastResults.length} names · ${r.source || "universe"}`
+    : "";
   applyFilters();
 }
+setTimeout(() => { if ($("runBatch")) $("runBatch").click(); }, 500);
 
 $("q").addEventListener("input", () => { clearTimeout(window._st); window._st = setTimeout(searchSuggest, 180); });
 $("q").addEventListener("keydown", e => { if (e.key === "Enter") { $("suggest").style.display="none"; screenOne($("q").value.trim()); }});
