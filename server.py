@@ -115,9 +115,19 @@ STANDARDS = {
 
 
 def http_get(url: str, timeout: int = 25) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    last = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Encoding": "identity"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            last = e
+            if "429" in str(e) or "403" in str(e):
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+    raise last
 
 
 def cache_path(name: str) -> Path:
@@ -285,9 +295,19 @@ def classify_business(sic: str | None, sic_desc: str, title: str):
 
 
 def http_get_ua(url: str, ua: str, timeout: int = 25) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
+    last = None
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": ua, "Accept-Encoding": "identity"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return resp.read()
+        except Exception as e:
+            last = e
+            if "429" in str(e):
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            raise
+    raise last
 
 
 def yahoo_price(symbol: str):
@@ -332,7 +352,7 @@ def yahoo_price(symbol: str):
         raise RuntimeError(f"price feed failed: {last_err}")
 
     try:
-        return cached_json(f"yahoo_{symbol}.json", fetch, ttl=120)
+        return cached_json(f"yahoo_{symbol}.json", fetch, ttl=900)
     except Exception as e:
         return {"error": str(e), "price": None, "name": symbol}
 
@@ -635,7 +655,7 @@ def export_from_etfs():
     return payload
 
 
-def enrich_prices(rows, limit=250):
+def enrich_prices(rows, limit=20):
     for row in rows[:limit]:
         if row.get("price") is not None:
             continue
@@ -828,7 +848,7 @@ def screen_symbol(symbol: str) -> dict:
         return json.loads(http_get(SEC_SUBS.format(cik=cik), timeout=30))
 
     try:
-        facts = cached_json(f"facts_{cik}.json", fetch_facts, ttl=12 * 3600)
+        facts = cached_json(f"facts_{cik}.json", fetch_facts, ttl=7 * 24 * 3600)
     except Exception as e:
         return {"ok": False, "symbol": symbol, "error": f"SEC facts failed: {e}"}
     try:
