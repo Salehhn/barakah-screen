@@ -18,6 +18,8 @@ STATIC = ROOT / "static"
 CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
 UNIVERSE = STATIC / "universe.json"
+PAPER = CACHE / "paper.json"
+SHARES = 100  # paper size per theoretical open
 SPUS_CSV = "https://www.sp-funds.com/wp-content/uploads/data/TidalFG_Holdings_SPUS.csv"
 
 UA = "BarakahScreen/1.0 (self-hosted educational screener; research@example.com)"
@@ -418,6 +420,107 @@ def fetch_ohlc(symbol: str, tf: str = "1d"):
         return cached_json(f"ohlc_{tf}_{symbol}.json", fetch, ttl=ttl)
     except Exception as e:
         return {"error": str(e)}
+
+
+def load_paper():
+    path = PAPER if PAPER.exists() else (STATIC / "paper.json")
+    if not path.exists():
+        return {"trades": [], "open": None}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"trades": [], "open": None}
+
+
+def save_paper(data):
+    text = json.dumps(data, indent=2)
+    PAPER.write_text(text, encoding="utf-8")
+    try:
+        (STATIC / "paper.json").write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def et_now():
+    return datetime.now(timezone.utc) - __import__("datetime").timedelta(hours=4)
+
+
+def paper_cum(trades):
+    return round(sum(t.get("pnl") or 0 for t in trades), 2)
+
+
+def update_paper_with_top(top, market):
+    """If tape healthy near the US open and no trade today, paper-buy #1. Else mark TP/EOD."""
+    book = load_paper()
+    now = et_now()
+    today = now.strftime("%Y-%m-%d")
+    hour, minute = now.hour, now.minute
+    buyers = (market or {}).get("buyers") or 0
+    pos = book.get("open")
+
+    if pos:
+        q = yahoo_price(pos["symbol"])
+        last = q.get("price")
+        if last is not None:
+            pos["last"] = last
+            tp = pos.get("tp1")
+            sl = pos.get("stop")
+            hit = None
+            if tp and last >= tp:
+                hit = "TP1"
+            elif sl and last <= sl:
+                hit = "SL"
+            elif hour >= 16:
+                hit = "EOD"
+            if hit:
+                pnl = round((last - pos["open_price"]) * pos.get("shares", SHARES), 2)
+                book["trades"].append({
+                    "symbol": pos["symbol"],
+                    "date": pos["date"],
+                    "open_price": pos["open_price"],
+                    "close_price": last,
+                    "exit": hit,
+                    "pnl": pnl,
+                    "shares": pos.get("shares", SHARES),
+                })
+                book["open"] = None
+            else:
+                book["open"] = pos
+        save_paper(book)
+        book["cumulative"] = paper_cum(book["trades"])
+        return book
+
+    already = any(t.get("date") == today for t in book.get("trades") or [])
+    in_open_window = (hour == 9 and minute >= 28) or (hour == 10) or (hour == 11 and minute < 30)
+    if already or not in_open_window or buyers < 60 or not top:
+        book["cumulative"] = paper_cum(book.get("trades") or [])
+        book["skipped"] = "already traded today" if already else (
+            "outside 9:28–11:30 ET window" if not in_open_window else (
+            "tape not healthy" if buyers < 60 else "no top name"
+        ))
+        return book
+
+    idea = top[0]
+    px = idea.get("price") or ((idea.get("levels") or {}).get("entry"))
+    if not px:
+        book["cumulative"] = paper_cum(book.get("trades") or [])
+        book["skipped"] = "no price on top name"
+        return book
+    lv = idea.get("levels") or {}
+    book["open"] = {
+        "symbol": idea.get("symbol"),
+        "date": today,
+        "open_price": float(px),
+        "tp1": lv.get("tp1"),
+        "stop": lv.get("stop"),
+        "shares": SHARES,
+        "last": float(px),
+        "opened_at": now.strftime("%H:%M ET"),
+    }
+    save_paper(book)
+    book["cumulative"] = paper_cum(book.get("trades") or [])
+    book["skipped"] = None
+    return book
 
 
 def market_tape():
@@ -1295,14 +1398,22 @@ class Handler(SimpleHTTPRequestHandler):
             for i, row in enumerate(ideas, 1):
                 row["rank"] = i
             top = ideas[:10]
+            tape = market_tape()
+            paper = update_paper_with_top(top, tape)
             return self._json({
                 "results": top,
                 "count": len(top),
                 "scored": len(ideas),
                 "skipped": skipped,
-                "market": market_tape(),
-                "note": "Day-trade style: daily trend first, then intraday score. Tape is SPY/QQQ. Not a buy order.",
+                "market": tape,
+                "paper": paper,
+                "note": "Paper log: 100 shares of #1 if tape healthy in the 9:28–11:30 ET window. Not a live order.",
             })
+
+        if path == "/api/paper":
+            book = load_paper()
+            book["cumulative"] = paper_cum(book.get("trades") or [])
+            return self._json(book)
 
         if path == "/ideas" or path == "/ideas.html":
             self.path = "/ideas.html"
