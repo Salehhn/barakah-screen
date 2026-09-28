@@ -124,7 +124,26 @@ function loadFilters() {
     if (typeof f.live === "boolean") $("live").checked = f.live;
   } catch (e) {}
 }
+function paintTape(m) {
+  if (!m) return;
+  const b = m.buyers != null ? m.buyers : 50;
+  const s = 100 - b;
+  $("buyFill").style.width = b + "%";
+  $("buyFill").textContent = "BUYERS " + b + "%";
+  $("sellFill").style.width = s + "%";
+  $("sellFill").textContent = "SELLERS " + s + "%";
+  $("tapeLab").textContent = (m.label || "Tape") + " · " + (m.stance || "");
+}
+async function loadTape() {
+  try {
+    const m = await fetch("/api/tape?_=" + Date.now()).then(x => x.json());
+    paintTape(m);
+  } catch (e) {
+    $("tapeLab").textContent = "Tape wait — click Rank setups or refresh";
+  }
+}
 loadFilters();
+loadTape();
 ["maxPrice","minPrice","verdict","tf","live"].forEach((id) => {
   $(id).addEventListener("change", saveFilters);
   $(id).addEventListener("input", saveFilters);
@@ -157,7 +176,7 @@ $("go").onclick = async () => {
     const move = old == null ? "" : (sc > old ? "up" : sc < old ? "down" : "");
     const arrow = move === "up" ? " ▲" : move === "down" ? " ▼" : "";
     return `<div class="row ${move}">
-      <div class="lab">#${x.rank} ${x.symbol}${arrow}<small>${x.setup||""}</small></div>
+      <div class="lab">#${x.rank} <a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent(x.symbol)}" target="_blank" rel="noopener" style="color:#f0d9a0">${x.symbol}</a>${arrow}<small>${x.setup||""}</small></div>
       <div class="track"><div class="fill" style="width:${Math.max(8, sc / maxS * 100)}%"></div></div>
       <div class="pts">${sc}</div>
       <div class="lv">Entry ${L.entry!=null?("$"+Number(L.entry).toFixed(2)):"—"}
