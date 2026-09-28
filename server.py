@@ -402,6 +402,18 @@ def fetch_ohlc(symbol: str, tf: str = "1d"):
 
 def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     ohlc = fetch_ohlc(symbol, tf)
+    if ohlc.get("error") and not (ohlc.get("close") or []):
+        return {
+            "symbol": symbol,
+            "name": screen.get("name"),
+            "price": screen.get("price"),
+            "overall": screen.get("overall"),
+            "score": 0,
+            "setup": "No live bars",
+            "reasons": [str(ohlc.get("error"))],
+            "timeframe": tf,
+            "levels": None,
+        }
     closes = [c for c in (ohlc.get("close") or []) if c is not None]
     vols = [v for v in (ohlc.get("volume") or []) if v is not None]
     highs = [h for h in (ohlc.get("high") or []) if h is not None]
@@ -615,6 +627,23 @@ def export_from_etfs():
     UNIVERSE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print("Wrote", UNIVERSE, "rows", payload["count"])
     return payload
+
+
+def enrich_prices(rows, limit=250):
+    for row in rows[:limit]:
+        if row.get("price") is not None:
+            continue
+        try:
+            q = yahoo_price(row.get("symbol") or "")
+            if q.get("price") is not None:
+                row["price"] = q.get("price")
+                row["change_pct"] = q.get("change_pct")
+                if q.get("name"):
+                    row["name"] = q.get("name")
+        except Exception:
+            pass
+        time.sleep(0.05)
+    return rows
 
 
 def universe_age_days():
@@ -1022,8 +1051,9 @@ class Handler(SimpleHTTPRequestHandler):
                 min_price = 0.0
             allowed = (q.get("verdict") or ["ALL"])[0].upper()
             allow = {x.strip() for x in allowed.split(",") if x.strip()}
-            rows = filter_universe_rows(snap.get("rows") or [], max_price, min_price, allow)
-            return self._json({"ok": True, "created_at": snap.get("created_at"), "results": rows, "count": len(rows)})
+            raw_rows = enrich_prices(list(snap.get("rows") or []))
+            rows = filter_universe_rows(raw_rows, max_price, min_price, allow)
+            return self._json({"ok": True, "created_at": snap.get("created_at"), "results": rows, "count": len(rows), "source": "weekly-universe"})
 
         if path == "/api/watchlist":
             return self._json({"symbols": WATCHLIST})
