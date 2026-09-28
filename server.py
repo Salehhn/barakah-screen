@@ -420,6 +420,63 @@ def fetch_ohlc(symbol: str, tf: str = "1d"):
         return {"error": str(e)}
 
 
+def market_tape():
+    """Buyers vs sellers snapshot from SPY + QQQ. Not a timing oracle."""
+    spy_d = fetch_ohlc("SPY", "1d")
+    spy_i = fetch_ohlc("SPY", "5m")
+    qqq_d = fetch_ohlc("QQQ", "1d")
+    def last_chg(ohlc):
+        c = [x for x in (ohlc.get("close") or []) if x is not None]
+        if len(c) < 2:
+            return None
+        return (c[-1] - c[-2]) / c[-2] * 100
+    def last_px(ohlc):
+        c = [x for x in (ohlc.get("close") or []) if x is not None]
+        return c[-1] if c else None
+    spy_sma = sma([x for x in (spy_d.get("close") or []) if x is not None], 20)
+    spy_px = last_px(spy_d)
+    spy_day = last_chg(spy_d)
+    qqq_day = last_chg(qqq_d)
+    buyers = 50
+    notes = []
+    if spy_px and spy_sma:
+        if spy_px > spy_sma:
+            buyers += 18
+            notes.append("SPY above 20-day average")
+        else:
+            buyers -= 18
+            notes.append("SPY below 20-day average")
+    if spy_day is not None:
+        buyers += max(-15, min(15, spy_day * 4))
+        notes.append(f"SPY day {spy_day:+.2f}%")
+    if qqq_day is not None:
+        buyers += max(-10, min(10, qqq_day * 3))
+        notes.append(f"QQQ day {qqq_day:+.2f}%")
+    rsi_spy = rsi([x for x in (spy_d.get("close") or []) if x is not None])
+    if rsi_spy is not None:
+        if rsi_spy > 70:
+            buyers -= 8
+            notes.append(f"SPY RSI {rsi_spy:.0f} hot")
+        elif rsi_spy < 35:
+            buyers += 4
+            notes.append(f"SPY RSI {rsi_spy:.0f} washed")
+    buyers = int(max(5, min(95, buyers)))
+    if buyers >= 62:
+        label, stance = "Buyers in control", "Market health: OK to look for longs"
+    elif buyers <= 38:
+        label, stance = "Sellers in control", "Stay away from fresh longs"
+    else:
+        label, stance = "Mixed tape", "Be picky — no clear buy-the-market bid"
+    return {
+        "buyers": buyers,
+        "sellers": 100 - buyers,
+        "label": label,
+        "stance": stance,
+        "spy": spy_px,
+        "notes": notes,
+    }
+
+
 def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     ohlc = fetch_ohlc(symbol, tf)
     closes_try = [c for c in (ohlc.get("close") or []) if c is not None]
@@ -447,6 +504,18 @@ def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     reasons = []
     score = 40
     setup = "Watch"
+    daily = fetch_ohlc(symbol, "1d")
+    d_closes = [c for c in (daily.get("close") or []) if c is not None]
+    d_sma = sma(d_closes, 20)
+    d_px = d_closes[-1] if d_closes else price
+    if d_sma and d_px:
+        if d_px > d_sma:
+            score += 10
+            reasons.append("Daily trend up (close > 20-day).")
+        else:
+            score -= 16
+            reasons.append("Daily trend down — poor day-trade long.")
+            setup = "Stay away (daily down)"
 
     sma20 = sma(closes, 20)
     sma50 = sma(closes, 50)
@@ -1225,7 +1294,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "count": len(top),
                 "scored": len(ideas),
                 "skipped": skipped,
-                "note": "Top 10 only. Halal list is daily; rank uses 1m/5m bars. Not a buy order.",
+                "market": market_tape(),
+                "note": "Day-trade style: daily trend first, then intraday score. Tape is SPY/QQQ. Not a buy order.",
             })
 
         if path == "/ideas" or path == "/ideas.html":
