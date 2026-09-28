@@ -18,6 +18,7 @@ STATIC = ROOT / "static"
 CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
 UNIVERSE = STATIC / "universe.json"
+SPUS_CSV = "https://www.sp-funds.com/wp-content/uploads/data/TidalFG_Holdings_SPUS.csv"
 
 UA = "BarakahScreen/1.0 (self-hosted educational screener; research@example.com)"
 SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -27,6 +28,7 @@ YAHOO_CHART = "https://query2.finance.yahoo.com/v8/finance/chart/{sym}?interval=
 
 _lock = threading.Lock()
 _tickers = None  # ticker -> {cik, title}
+_etf_refreshing = False
 
 WATCHLIST = [
     "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA", "AVGO", "AMD", "NFLX",
@@ -551,6 +553,103 @@ def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     }
 
 
+def _parse_csv_tickers(text: str):
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return []
+    header = [h.strip().strip('"') for h in lines[0].split(",")]
+    idx = None
+    for name in ("StockTicker", "Ticker", "ticker", "Symbol"):
+        if name in header:
+            idx = header.index(name)
+            break
+    out = []
+    for ln in lines[1:]:
+        cols = [c.strip().strip('"') for c in ln.split(",")]
+        t = ""
+        if idx is not None and idx < len(cols):
+            t = cols[idx].upper().replace(".", "-")
+        if t and all(ch.isalnum() or ch in "-" for ch in t) and 1 < len(t) <= 6:
+            if t not in ("SPUS", "HLAL", "UMMA", "CASH", "USD"):
+                out.append(t)
+    return out
+
+
+def fetch_etf_holdings():
+    found = {}
+    try:
+        raw = http_get_ua(SPUS_CSV, UA, timeout=30).decode("utf-8", "replace")
+        for t in _parse_csv_tickers(raw):
+            found.setdefault(t, set()).add("SPUS")
+    except Exception as e:
+        print("SPUS holdings fetch failed:", e)
+    extra = STATIC / "etf-extra.txt"
+    if extra.exists():
+        for line in extra.read_text(encoding="utf-8").splitlines():
+            t = line.split("#")[0].strip().upper().replace(".", "-")
+            if t:
+                found.setdefault(t, set()).add("LOCAL")
+    rows = []
+    for t, srcs in sorted(found.items()):
+        rows.append({
+            "ok": True,
+            "symbol": t,
+            "name": t,
+            "overall": "PASS",
+            "aaoifi": "PASS" if "SPUS" in srcs else "REVIEW",
+            "sp": "PASS" if "SPUS" in srcs else "REVIEW",
+            "etfs": sorted(srcs),
+            "source": "etf-holdings",
+            "price": None,
+        })
+    return {
+        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "count": len(rows),
+        "rows": rows,
+        "note": "Deduped ETF holdings. SPUS from issuer CSV. Add HLAL/UMMA tickers in static/etf-extra.txt.",
+    }
+
+
+def export_from_etfs():
+    payload = fetch_etf_holdings()
+    UNIVERSE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print("Wrote", UNIVERSE, "rows", payload["count"])
+    return payload
+
+
+def universe_age_days():
+    snap = load_universe()
+    if not snap or not snap.get("created_at"):
+        return 999
+    try:
+        created = datetime.strptime(snap["created_at"].replace(" UTC", ""), "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - created).total_seconds() / 86400
+    except Exception:
+        return 999
+
+
+def refresh_etf_universe_async(force=False):
+    global _etf_refreshing
+    if not force and universe_age_days() < 7:
+        return
+    with _lock:
+        if _etf_refreshing:
+            return
+        _etf_refreshing = True
+
+    def work():
+        global _etf_refreshing
+        try:
+            print("Refreshing ETF universe on server…")
+            export_from_etfs()
+        except Exception as e:
+            print("ETF refresh failed:", e)
+        finally:
+            _etf_refreshing = False
+
+    threading.Thread(target=work, daemon=True).start()
+
+
 def load_universe():
     if not UNIVERSE.exists():
         return None
@@ -894,6 +993,9 @@ class Handler(SimpleHTTPRequestHandler):
         path = parsed.path
         q = urllib.parse.parse_qs(parsed.query)
 
+        if path in ("/api/ideas", "/api/batch", "/api/universe", "/"):
+            refresh_etf_universe_async(False)
+
         if path == "/api/health":
             snap = load_universe()
             return self._json({
@@ -1055,11 +1157,20 @@ def main():
         extra = [s.strip().upper() for s in sys.argv[2:] if s.strip()]
         export_universe(extra or WATCHLIST)
         return
+    if len(sys.argv) > 1 and sys.argv[1] in ("--from-etfs", "etfs"):
+        export_from_etfs()
+        return
     port = int(os.environ.get("PORT", "8787"))
     print(f"Halal screener → http://127.0.0.1:{port}")
     snap = load_universe()
     if snap:
         print("Weekly table:", snap.get("created_at"), "rows", snap.get("count"))
+    refresh_etf_universe_async(force=not bool(snap))
+    def loop():
+        while True:
+            time.sleep(24 * 3600)
+            refresh_etf_universe_async(False)
+    threading.Thread(target=loop, daemon=True).start()
     print("Warming SEC ticker map…")
     try:
         n = len(load_tickers())
