@@ -74,8 +74,8 @@
       </label>
       <label>Bars
         <select id="tf">
-          <option value="1d" selected>Daily</option>
-          <option value="5m">5 minute</option>
+          <option value="5m" selected>5 minute</option>
+          <option value="1d">Daily</option>
           <option value="1m">1 minute</option>
         </select>
       </label>
@@ -83,6 +83,13 @@
       <label><input id="live" type="checkbox" checked /> Auto-refresh every 1 min</label>
     </div>
     <div class="meta" id="clock"></div>
+    <div id="tape" class="card" style="margin-top:10px">
+      <div class="meta">Market tape (SPY / QQQ)</div>
+      <div class="track" style="height:22px;margin:8px 0">
+        <div id="buyFill" class="fill" style="width:50%"></div>
+      </div>
+      <div class="meta" id="tapeLab">Loading buyers vs sellers…</div>
+    </div>
   </header>
   <main>
     <div id="status" class="meta"></div>
@@ -125,7 +132,11 @@ $("go").onclick = async () => {
   if (firstLoad) $("list").innerHTML = `<div class="empty">Scoring ${tf} bars…</div>`;
   const r = await fetch(`/api/ideas?max_price=${encodeURIComponent(max)}&min_price=${encodeURIComponent(min)}&verdict=${encodeURIComponent(v)}&tf=${encodeURIComponent(tf)}&_=${Date.now()}`).then(x=>x.json());
   const top = (r.results || []).slice(0, 10);
-  $("status").textContent = `Top ${top.length} · highest bar = strongest setup this minute`;
+  const m = r.market || {};
+  const b = m.buyers != null ? m.buyers : 50;
+  $("buyFill").style.width = b + "%";
+  $("tapeLab").textContent = (m.label || "") + " · " + (m.stance || "") + " · buyers " + b + "% / sellers " + (m.sellers != null ? m.sellers : 100-b) + "%";
+  $("status").textContent = `Top ${top.length} · day-trade rank (daily trend + ${tf} bars)`;
   if (!top.length) {
     $("list").innerHTML = `<div class="empty">No halal names matched. Raise max price or use PASS + REVIEW.</div>`;
     return;
