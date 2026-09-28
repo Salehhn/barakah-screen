@@ -53,6 +53,9 @@
     .row.down .fill { background:linear-gradient(90deg,#6a4a2a,#e0b25c); }
     .pts { text-align:right; color:var(--gold2); font-weight:700; }
     .lv { grid-column: 1 / -1; color:var(--muted); font-size:12px; }
+    .tape-box { background:#10241c; border:1px solid var(--gold); border-radius:14px; padding:12px; margin:12px 0; }
+    .tape-split { display:flex; height:26px; border-radius:99px; overflow:hidden; background:#3d1c18; }
+    .tape-buy { background:linear-gradient(90deg,#2f8f63,#7dcaa8); color:#07110d; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; }
   </style>
 </head>
 <body>
@@ -83,12 +86,13 @@
       <label><input id="live" type="checkbox" checked /> Auto-refresh every 1 min</label>
     </div>
     <div class="meta" id="clock"></div>
-    <div id="tape" class="card" style="margin-top:10px">
-      <div class="meta">Market tape (SPY / QQQ)</div>
-      <div class="track" style="height:22px;margin:8px 0">
-        <div id="buyFill" class="fill" style="width:50%"></div>
+    <div id="tape" class="tape-box">
+      <div class="meta"><b>Buyers vs sellers</b> · SPY / QQQ · works after close using last session</div>
+      <div class="tape-split" style="margin:8px 0">
+        <div id="buyFill" class="tape-buy" style="width:50%">BUYERS 50%</div>
+        <div id="sellFill" style="width:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:#f0d9a0">SELLERS 50%</div>
       </div>
-      <div class="meta" id="tapeLab">Loading buyers vs sellers…</div>
+      <div class="meta" id="tapeLab">Will fill after Rank setups. Closed market = last US session, not live tape.</div>
     </div>
   </header>
   <main>
@@ -134,8 +138,12 @@ $("go").onclick = async () => {
   const top = (r.results || []).slice(0, 10);
   const m = r.market || {};
   const b = m.buyers != null ? m.buyers : 50;
+  const s = 100 - b;
   $("buyFill").style.width = b + "%";
-  $("tapeLab").textContent = (m.label || "") + " · " + (m.stance || "") + " · buyers " + b + "% / sellers " + (m.sellers != null ? m.sellers : 100-b) + "%";
+  $("buyFill").textContent = "BUYERS " + b + "%";
+  $("sellFill").style.width = s + "%";
+  $("sellFill").textContent = "SELLERS " + s + "%";
+  $("tapeLab").textContent = (m.label || "Tape") + " · " + (m.stance || "") + " · last session is fine when US is closed";
   $("status").textContent = `Top ${top.length} · day-trade rank (daily trend + ${tf} bars)`;
   if (!top.length) {
     $("list").innerHTML = `<div class="empty">No halal names matched. Raise max price or use PASS + REVIEW.</div>`;
