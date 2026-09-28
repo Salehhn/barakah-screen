@@ -402,6 +402,12 @@ def fetch_ohlc(symbol: str, tf: str = "1d"):
 
 def idea_score(symbol: str, screen: dict, tf: str = "5m") -> dict:
     ohlc = fetch_ohlc(symbol, tf)
+    closes_try = [c for c in (ohlc.get("close") or []) if c is not None]
+    if len(closes_try) < 15:
+        daily = fetch_ohlc(symbol, "1d")
+        if len([c for c in (daily.get("close") or []) if c is not None]) >= 15:
+            ohlc = daily
+            tf = tf + "→1d"
     if ohlc.get("error") and not (ohlc.get("close") or []):
         return {
             "symbol": symbol,
@@ -739,7 +745,9 @@ def filter_universe_rows(rows, max_price, min_price, allow):
         if allow and "ALL" not in allow and v not in allow:
             continue
         px = sc.get("price")
-        if px is not None:
+        if min_price not in (None, 0) or max_price is not None:
+            if px is None:
+                continue
             if min_price is not None and px < min_price:
                 continue
             if max_price is not None and px > max_price:
@@ -752,7 +760,8 @@ def daily_eligible(max_price, min_price, allow):
     """Halal + price universe. Prefer weekly static/universe.json."""
     snap = load_universe()
     if snap and snap.get("rows"):
-        return filter_universe_rows(snap["rows"], max_price, min_price, allow)
+        rows = enrich_prices(list(snap["rows"]))
+        return filter_universe_rows(rows, max_price, min_price, allow)
 
     def fetch():
         rows = []
