@@ -64,6 +64,7 @@
     <nav>
       <a href="/">Halal screen</a>
       <a href="/ideas.html">Buy setups</a>
+      <a href="/history.html">Historical trades</a>
     </nav>
     <p class="meta">Ranks names that already passed your halal + price filter. Score uses trend, RSI, relative volume and breakout distance — Trade Ideas style rules, not Holly AI and not a buy order.</p>
     <div class="filters">
@@ -174,6 +175,7 @@ $("go").onclick = async () => {
   const op = p.open;
   $("paperSum").textContent = "Cumulative $ " + (p.cumulative != null ? p.cumulative : 0)
     + (op ? " · OPEN " + op.symbol + " @ " + op.open_price : "")
+    + (p.server_et ? " · clock " + p.server_et : "")
     + (p.skipped ? " · " + p.skipped : "");
   if (trs.length) {
     $("paperTbl").innerHTML = `<table class="board"><thead><tr>

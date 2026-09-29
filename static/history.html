@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Barakah — Historical trades</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:#07110d; --bg2:#0c1c16; --line:#1e3d31; --gold:#d4b46a; --gold2:#f0d9a0;
+      --mint:#7dcaa8; --text:#e8f0ea; --muted:#8aa396; --fail:#e07a6a; --pass:#5fd0a0;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:"IBM Plex Sans",system-ui,sans-serif; }
+    header, main { max-width:900px; margin:0 auto; padding:16px; }
+    .brand { font-family:"IBM Plex Serif",serif; font-size:24px; color:var(--gold2); }
+    nav a { color:var(--mint); margin-right:14px; font-size:13px; }
+    .meta { color:var(--muted); font-size:13px; }
+    table { width:100%; border-collapse:collapse; margin-top:12px; }
+    th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:14px; }
+    th { color:var(--muted); font-size:12px; }
+    .win { color:var(--pass); }
+    .loss { color:var(--fail); }
+    .tot { margin-top:16px; font-size:20px; color:var(--gold2); }
+    .openbox { background:#10241c; border:1px solid var(--gold); border-radius:12px; padding:12px; margin:12px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Historical trades</div>
+    <nav>
+      <a href="/">Halal screen</a>
+      <a href="/ideas.html">Buy setups</a>
+      <a href="/history.html">Historical trades</a>
+    </nav>
+    <p class="meta">Paper log only — 100 shares of the top Ideas name when the tape is healthy in US cash hours. Not a broker fill.</p>
+  </header>
+  <main>
+    <div id="open"></div>
+    <div id="log" class="meta">Loading…</div>
+    <div class="tot" id="cum"></div>
+  </main>
+<script>
+function money(n){ if(n==null||Number.isNaN(n)) return "—"; return (n<0?"-":"") + "$" + Math.abs(n).toFixed(2); }
+function pts(n){ if(n==null||Number.isNaN(n)) return "—"; return (n>=0?"+":"") + Number(n).toFixed(2); }
+fetch("/api/paper?_="+Date.now()).then(r=>r.json()).then(p=>{
+  const op = p.open;
+  if (op) {
+    document.getElementById("open").innerHTML = `<div class="openbox">
+      <b>Open now</b> ${op.symbol} · opened ${op.date||""} ${op.opened_at||""}
+      · open ${money(op.open_price)} · last ${money(op.last)}
+      · TP1 ${money(op.tp1)} · SL ${money(op.stop)}
+    </div>`;
+  }
+  const rows = (p.trades||[]).slice().reverse();
+  if (!rows.length && !op) {
+    document.getElementById("log").textContent = "No paper trades yet. Leave Ideas open during 09:28–15:55 ET.";
+    document.getElementById("cum").textContent = "Cumulative points 0 · $0";
+    return;
+  }
+  document.getElementById("log").innerHTML = `<table>
+    <thead><tr>
+      <th>Date</th><th>Symbol</th><th>Open price</th><th>Close price</th>
+      <th>Exit</th><th>Points</th><th>$ (100 sh)</th>
+    </tr></thead>
+    <tbody>${rows.map(t=>{
+      const points = (t.close_price!=null && t.open_price!=null) ? (t.close_price - t.open_price) : null;
+      const cls = (t.pnl||0) >= 0 ? "win" : "loss";
+      return `<tr>
+        <td>${t.date||""}</td>
+        <td><b>${t.symbol||""}</b></td>
+        <td>${money(t.open_price)}</td>
+        <td>${money(t.close_price)}</td>
+        <td>${t.exit||""}</td>
+        <td class="${cls}">${pts(points)}</td>
+        <td class="${cls}">${money(t.pnl)}</td>
+      </tr>`;
+    }).join("")}</tbody>
+  </table>`;
+  const cumP = rows.reduce((a,t)=>a+((t.close_price||0)-(t.open_price||0)),0);
+  const cum$ = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pnl||0),0);
+  document.getElementById("cum").innerHTML =
+    `Cumulative points <b>${pts(cumP)}</b> &nbsp;·&nbsp; Cumulative $ <b>${money(cum$)}</b>`;
+}).catch(e=>{
+  document.getElementById("log").textContent = "Could not load log: "+e;
+});
+</script>
+</body>
+</html>
