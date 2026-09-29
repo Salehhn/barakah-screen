@@ -442,7 +442,11 @@ def save_paper(data):
 
 
 def et_now():
-    return datetime.now(timezone.utc) - __import__("datetime").timedelta(hours=4)
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return datetime.now(timezone.utc) - __import__("datetime").timedelta(hours=4)
 
 
 def paper_cum(trades):
@@ -491,13 +495,23 @@ def update_paper_with_top(top, market):
         return book
 
     already = any(t.get("date") == today for t in book.get("trades") or [])
-    in_open_window = (hour == 9 and minute >= 28) or (hour == 10) or (hour == 11 and minute < 30)
+    weekday = now.weekday() < 5
+    mins = hour * 60 + minute
+    in_open_window = weekday and (9 * 60 + 28) <= mins <= (15 * 60 + 55)
+    book["server_et"] = now.strftime("%Y-%m-%d %H:%M ET")
     if already or not in_open_window or buyers < 60 or not top:
         book["cumulative"] = paper_cum(book.get("trades") or [])
-        book["skipped"] = "already traded today" if already else (
-            "outside 9:28–11:30 ET window" if not in_open_window else (
-            "tape not healthy" if buyers < 60 else "no top name"
-        ))
+        if already:
+            why = "already paper-traded today"
+        elif not weekday:
+            why = "US market closed (weekend)"
+        elif not in_open_window:
+            why = f"outside cash hours — server clock {book['server_et']} (need 09:28–15:55 ET)"
+        elif buyers < 60:
+            why = f"tape not healthy (buyers {buyers} < 60)"
+        else:
+            why = "no top name"
+        book["skipped"] = why
         return book
 
     idea = top[0]
@@ -1417,6 +1431,10 @@ class Handler(SimpleHTTPRequestHandler):
 
         if path == "/ideas" or path == "/ideas.html":
             self.path = "/ideas.html"
+            return super().do_GET()
+
+        if path == "/history" or path == "/history.html":
+            self.path = "/history.html"
             return super().do_GET()
 
         if path == "/" or path == "/index.html":
