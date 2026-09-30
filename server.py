@@ -1358,13 +1358,14 @@ def fx_score_one(item, tf="1h"):
         side, score, reasons = "BUY", buy, br
     else:
         side, score, reasons = "SELL", sell, sr
-    a = fx_atr(highs or closes, lows or closes, closes)
+    a = fx_atr(highs[-30:] if highs else closes, lows[-30:] if lows else closes, closes[-30:] if closes else [])
     if not a:
-        a = price * 0.008
+        a = price * 0.004
+    a = min(a, price * 0.012)
     if side == "BUY":
-        entry, stop, tp1, tp2 = price, price - 1.2 * a, price + 1.5 * a, price + 2.4 * a
+        entry, stop, tp1, tp2 = price, price - 1.0 * a, price + 1.2 * a, price + 2.0 * a
     else:
-        entry, stop, tp1, tp2 = price, price + 1.2 * a, price - 1.5 * a, price - 2.4 * a
+        entry, stop, tp1, tp2 = price, price + 1.0 * a, price - 1.2 * a, price - 2.0 * a
     setup = "Strong " + side if score >= 70 else ("Watch " + side if score >= 55 else "Weak")
     return {
         "symbol": item["symbol"],
@@ -1436,20 +1437,28 @@ def save_fx_paper(data):
         pass
 
 
+def fx_slot_now(now):
+    daytime = 8 <= now.hour < 20
+    qmin = (now.minute // 15) * 15
+    slot_id = f"{now.strftime('%Y-%m-%d')}-{now.hour:02d}{qmin:02d}"
+    slot_label = f"{now.hour:02d}:{qmin:02d}"
+    return daytime, slot_id, slot_label
+
+
+def fx_mark(pos, last):
+    if not pos or last is None or not pos.get("open_price"):
+        return 0.0
+    signed = 1 if pos.get("side") == "BUY" else -1
+    return round(signed * (last - pos["open_price"]) / pos["open_price"] * 100, 3)
+
+
 def fx_update_paper(top, tape):
-    """One paper trade per 4-hour daytime slot (+04): 08:00, 12:00, 16:00."""
+    """One paper trade per 15-minute daytime slot (+04, 08:00–20:00) while the page is hit."""
     book = load_fx_paper()
     now = user_now()
     today = now.strftime("%Y-%m-%d")
     hour = now.hour
-    slots = (8, 12, 16)
-    daytime = 8 <= hour < 20
-    slot = None
-    for s in slots:
-        if s <= hour < s + 4:
-            slot = s
-            break
-    slot_id = f"{today}-{slot:02d}" if slot is not None else None
+    daytime, slot_id, slot_label = fx_slot_now(now)
     pos = book.get("open")
 
     def close_pos(pos, last, why):
@@ -1463,6 +1472,7 @@ def fx_update_paper(top, tape):
             "side": pos.get("side"),
             "date": pos.get("date"),
             "slot": pos.get("slot"),
+            "slot_id": pos.get("slot_id"),
             "open_price": pos["open_price"],
             "close_price": last,
             "exit": why,
@@ -1496,24 +1506,27 @@ def fx_update_paper(top, tape):
             if hit:
                 close_pos(pos, last, hit)
             else:
+                pos["live_pct"] = fx_mark(pos, last)
                 book["open"] = pos
         save_fx_paper(book)
-        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        closed = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        live = (book.get("open") or {}).get("live_pct") or 0
+        book["cumulative"] = round(closed + live, 3)
+        book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
 
-    done = any(t.get("slot_id") == slot_id or (t.get("date") == today and t.get("slot") == slot) for t in book.get("trades") or [])
-    if pos and pos.get("slot_id") == slot_id:
-        done = True
+    done = any(t.get("slot_id") == slot_id for t in book.get("trades") or [])
     buyers = (tape or {}).get("buyers") or 50
-    if not daytime or slot is None:
-        book["skipped"] = f"outside daytime slots 08/12/16 +04 — clock {now.strftime('%H:%M +04')}"
+    if not daytime:
+        book["skipped"] = f"outside daytime 08:00–20:00 +04 — clock {now.strftime('%H:%M +04')}"
         book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     if done:
-        book["skipped"] = f"already logged slot {slot:02d}:00 +04"
+        book["skipped"] = f"already logged slot {slot_label} +04"
         book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     if not top:
@@ -1535,12 +1548,13 @@ def fx_update_paper(top, tape):
         "group": idea.get("group"),
         "side": idea.get("side"),
         "date": today,
-        "slot": slot,
+        "slot": slot_label,
         "slot_id": slot_id,
         "open_price": float(px),
         "tp1": lv.get("tp1"),
         "stop": lv.get("stop"),
         "last": float(px),
+        "live_pct": 0,
         "opened_at": now.strftime("%H:%M +04"),
         "tape": buyers,
     }
@@ -1769,12 +1783,24 @@ class Handler(SimpleHTTPRequestHandler):
                 "count": len(ranked),
                 "market": tape,
                 "paper": paper,
-                "note": "Metals, FX, coins, oil. Rank is best BUY or SELL right now. Paper every 4h at 08/12/16 +04.",
+                "note": "Paper every 15 min while /fx.html is open, 08:00–20:00 +04.",
             })
 
         if path == "/api/fx/paper":
             book = load_fx_paper()
-            book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+            op = book.get("open")
+            if op and op.get("symbol"):
+                q = yahoo_price(op["symbol"], ttl=20)
+                last = q.get("price")
+                if last is not None:
+                    op["last"] = last
+                    op["live_pct"] = fx_mark(op, last)
+                    book["open"] = op
+                    save_fx_paper(book)
+            closed = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+            live = (book.get("open") or {}).get("live_pct") or 0
+            book["cumulative"] = round(closed + live, 3)
+            book["closed_count"] = len(book.get("trades") or [])
             book["server_local"] = user_now().strftime("%Y-%m-%d %H:%M +04")
             return self._json(book)
 
