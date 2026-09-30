@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Barakah Tape — metals, FX, coins, oil</title>
+  <link rel="manifest" href="/manifest.json" />
+  <link rel="icon" href="/icon.svg" />
+  <style>
+    :root {
+      --bg:#071018; --line:#1c3348; --gold:#d4b46a; --gold2:#f0d9a0;
+      --mint:#7dcaa8; --text:#e8eef0; --muted:#8aa0b0; --sell:#e07a6a; --buy:#5fd0a0;
+    }
+    * { box-sizing:border-box; }
+    body { margin:0; background:radial-gradient(800px 360px at 80% -10%, #163044 0%, transparent 50%), var(--bg);
+      color:var(--text); font-family:system-ui,sans-serif; }
+    header, main { max-width:980px; margin:0 auto; padding:16px; }
+    .brand { font-size:24px; color:var(--gold2); font-weight:700; }
+    nav a { color:var(--mint); margin-right:14px; font-size:13px; }
+    .meta { color:var(--muted); font-size:13px; }
+    button { background:linear-gradient(180deg,#e2c27a,#b8923e); color:#1a1408; border:0; border-radius:12px; padding:10px 14px; font-weight:600; }
+    .tape-box { background:#102033; border:1px solid var(--gold); border-radius:14px; padding:12px; margin:12px 0; }
+    .tape-split { display:flex; height:26px; border-radius:99px; overflow:hidden; background:#3d1c18; }
+    .tape-buy { background:linear-gradient(90deg,#2f8f63,#7dcaa8); color:#07110d; font-size:12px; font-weight:700;
+      display:flex; align-items:center; justify-content:center; }
+    .chart { display:flex; flex-direction:column; gap:8px; }
+    .row { display:grid; grid-template-columns: 92px 1fr 58px; gap:8px; align-items:center;
+      background:rgba(16,32,48,.85); border:1px solid var(--line); border-radius:12px; padding:8px 10px; }
+    .lab { font-weight:700; }
+    .lab small { display:block; color:var(--muted); font-weight:400; font-size:11px; }
+    .track { height:16px; background:#1a2c3d; border-radius:99px; overflow:hidden; }
+    .fill { height:100%; border-radius:99px; background:linear-gradient(90deg,#3d7a5c,#d4b46a); }
+    .row.SELL .fill { background:linear-gradient(90deg,#8a4034,#e07a6a); }
+    .row.BUY .fill { background:linear-gradient(90deg,#2f8f63,#7dcaa8); }
+    .pts { text-align:right; color:var(--gold2); font-weight:700; }
+    .lv { grid-column:1/-1; color:var(--muted); font-size:12px; }
+    .side { font-size:11px; font-weight:700; }
+    .BUY { color:var(--buy); }
+    .SELL { color:var(--sell); }
+    a.sym { color:var(--gold2); text-decoration:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">Barakah Tape</div>
+    <nav>
+      <a href="/">Stocks</a>
+      <a href="/fx.html">Metals / FX / Oil</a>
+      <a href="/fx-history.html">Historical trades</a>
+    </nav>
+    <p class="meta">Ranks gold, silver, copper, platinum, WTI, Brent, majors, BTC/ETH/SOL/XRP. Each name is scored for <b>BUY and SELL</b>; the stronger side wins. Paper trade every 4 hours at 08:00 / 12:00 / 16:00 (+04).</p>
+    <button id="go">Rank now</button>
+    <label class="meta"><input id="live" type="checkbox" checked /> Auto every 15 min</label>
+    <div class="meta" id="clock"></div>
+    <div class="tape-box">
+      <div class="meta"><b>Tape</b> · Gold / Oil / BTC / EUR</div>
+      <div class="tape-split" style="margin:8px 0">
+        <div id="buyFill" class="tape-buy" style="width:50%">RISK-ON 50%</div>
+        <div id="sellFill" style="width:50%;display:flex;align-items:center;justify-content:center;font-size:12px;color:#f0d9a0">RISK-OFF 50%</div>
+      </div>
+      <div class="meta" id="tapeLab">Loading tape…</div>
+    </div>
+  </header>
+  <main>
+    <div id="paper" class="tape-box">
+      <div class="meta"><b>Paper this slot</b> · 08 / 12 / 16 +04 · 1 unit · % points</div>
+      <div class="meta" id="paperSum">—</div>
+    </div>
+    <div id="list" class="meta">Click Rank now.</div>
+  </main>
+<script>
+const $ = (id) => document.getElementById(id);
+function paintTape(m) {
+  const b = m && m.buyers != null ? m.buyers : 50;
+  $("buyFill").style.width = b + "%";
+  $("buyFill").textContent = "RISK-ON " + b + "%";
+  $("sellFill").style.width = (100-b) + "%";
+  $("sellFill").textContent = "RISK-OFF " + (100-b) + "%";
+  $("tapeLab").textContent = ((m&&m.label)||"") + " · " + ((m&&m.stance)||"");
+}
+async function loadTape() {
+  try { paintTape(await fetch("/api/fx/tape?_="+Date.now()).then(r=>r.json())); } catch(e) {}
+}
+$("go").onclick = async () => {
+  $("list").textContent = "Scoring metals, FX, coins, oil…";
+  const r = await fetch("/api/fx/ideas?_="+Date.now()).then(x=>x.json());
+  paintTape(r.market||{});
+  const p = r.paper || {};
+  $("paperSum").textContent = (p.open
+      ? ("OPEN "+p.open.side+" "+(p.open.name||p.open.symbol)+" @ "+p.open.open_price)
+      : "No open slot trade")
+    + " · cum % " + (p.cumulative!=null?p.cumulative:0)
+    + (p.server_local ? " · "+p.server_local : "")
+    + (p.skipped ? " · "+p.skipped : "");
+  const rows = r.results || [];
+  const maxS = Math.max(100, ...rows.map(x=>x.score||0));
+  $("list").innerHTML = `<div class="chart">${rows.map(x=>{
+    const L = x.levels || {};
+    const href = "https://www.tradingview.com/chart/?symbol="+encodeURIComponent(x.tv||x.symbol);
+    return `<div class="row ${x.side||""}">
+      <div class="lab">#${x.rank} <a class="sym" href="${href}" target="_blank">${x.name||x.symbol}</a>
+        <small>${x.group||""} · <span class="side ${x.side}">${x.side||""}</span> ${x.setup||""}</small></div>
+      <div class="track"><div class="fill" style="width:${Math.max(6,(x.score||0)/maxS*100)}%"></div></div>
+      <div class="pts">${x.score??"—"}</div>
+      <div class="lv">last ${x.price!=null?Number(x.price):"—"}
+        · Entry ${L.entry??"—"} · TP1 ${L.tp1??"—"} · SL ${L.stop??"—"}
+        ${x.change_pct!=null?(" · "+Number(x.change_pct).toFixed(2)+"%"):""}</div>
+    </div>`;
+  }).join("")}</div>`;
+  $("clock").textContent = "Updated " + new Date().toLocaleTimeString();
+};
+loadTape();
+$("go").click();
+setInterval(()=>{ if ($("live").checked) $("go").click(); }, 15*60*1000);
+</script>
+</body>
+</html>
