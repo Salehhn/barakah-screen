@@ -19,7 +19,27 @@ CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
 UNIVERSE = STATIC / "universe.json"
 PAPER = CACHE / "paper.json"
+FX_PAPER = CACHE / "fx-paper.json"
 SHARES = 100  # paper size per theoretical open
+
+FX_BOOK = [
+    {"symbol": "GC=F", "tv": "XAUUSD", "name": "Gold", "group": "Metal"},
+    {"symbol": "SI=F", "tv": "XAGUSD", "name": "Silver", "group": "Metal"},
+    {"symbol": "HG=F", "tv": "HG1!", "name": "Copper", "group": "Metal"},
+    {"symbol": "PL=F", "tv": "XPTUSD", "name": "Platinum", "group": "Metal"},
+    {"symbol": "CL=F", "tv": "USOIL", "name": "WTI Oil", "group": "Oil"},
+    {"symbol": "BZ=F", "tv": "UKOIL", "name": "Brent Oil", "group": "Oil"},
+    {"symbol": "EURUSD=X", "tv": "EURUSD", "name": "EUR/USD", "group": "Forex"},
+    {"symbol": "GBPUSD=X", "tv": "GBPUSD", "name": "GBP/USD", "group": "Forex"},
+    {"symbol": "USDJPY=X", "tv": "USDJPY", "name": "USD/JPY", "group": "Forex"},
+    {"symbol": "AUDUSD=X", "tv": "AUDUSD", "name": "AUD/USD", "group": "Forex"},
+    {"symbol": "USDCAD=X", "tv": "USDCAD", "name": "USD/CAD", "group": "Forex"},
+    {"symbol": "USDCHF=X", "tv": "USDCHF", "name": "USD/CHF", "group": "Forex"},
+    {"symbol": "BTC-USD", "tv": "BTCUSD", "name": "Bitcoin", "group": "Coin"},
+    {"symbol": "ETH-USD", "tv": "ETHUSD", "name": "Ethereum", "group": "Coin"},
+    {"symbol": "SOL-USD", "tv": "SOLUSD", "name": "Solana", "group": "Coin"},
+    {"symbol": "XRP-USD", "tv": "XRPUSD", "name": "XRP", "group": "Coin"},
+]
 SPUS_CSV = "https://www.sp-funds.com/wp-content/uploads/data/TidalFG_Holdings_SPUS.csv"
 
 UA = "BarakahScreen/1.0 (self-hosted educational screener; research@example.com)"
@@ -1243,6 +1263,311 @@ def screen_symbol(symbol: str) -> dict:
     }
 
 
+def user_now():
+    """User daytime is UTC+4."""
+    return datetime.now(timezone.utc) - __import__("datetime").timedelta(hours=-4) if False else (
+        datetime.now(timezone.utc) + __import__("datetime").timedelta(hours=4)
+    )
+
+
+def fx_atr(highs, lows, closes, n=14):
+    if min(len(highs), len(lows), len(closes)) < n + 1:
+        return None
+    trs = []
+    for i in range(-n, 0):
+        h, l, pc = highs[i], lows[i], closes[i - 1]
+        if None in (h, l, pc):
+            continue
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+    if not trs:
+        return None
+    return sum(trs) / len(trs)
+
+
+def score_side(closes, highs, vols, price, side):
+    score = 40
+    reasons = []
+    sma20 = sma(closes, 20)
+    sma50 = sma(closes, 50)
+    r = rsi(closes)
+    day_chg = None
+    if len(closes) >= 2 and closes[-2]:
+        day_chg = (closes[-1] - closes[-2]) / closes[-2] * 100
+    rel_vol = None
+    if len(vols) >= 21 and vols[-1] and sum(vols[-21:-1]):
+        rel_vol = vols[-1] / (sum(vols[-21:-1]) / 20)
+
+    up = side == "BUY"
+    if sma20 and price:
+        if (price > sma20) == up:
+            score += 14
+            reasons.append("Price vs SMA20 favors " + side)
+        else:
+            score -= 10
+    if sma50 and price:
+        if (price > sma50) == up:
+            score += 10
+        else:
+            score -= 8
+    if r is not None:
+        if up and 45 <= r <= 68:
+            score += 12
+        elif up and r < 35:
+            score += 6
+            reasons.append("Washed RSI — bounce long")
+        elif up and r > 75:
+            score -= 12
+        elif (not up) and 32 <= r <= 55:
+            score += 12
+        elif (not up) and r > 70:
+            score += 8
+            reasons.append("Stretched RSI — fade short")
+        elif (not up) and r < 30:
+            score -= 12
+    if day_chg is not None:
+        if (day_chg > 0) == up:
+            score += min(12, abs(day_chg) * 2)
+        else:
+            score -= min(10, abs(day_chg) * 2)
+    if rel_vol and rel_vol >= 1.3:
+        score += 8
+        reasons.append("Volume expanding")
+    score = int(max(0, min(99, score)))
+    return score, reasons, r, day_chg
+
+
+def fx_score_one(item, tf="1h"):
+    # 1h not in TF_MAP — map hourly to 5m/1d mix: use 1d for stability + 5m impulse
+    daily = fetch_ohlc(item["symbol"], "1d")
+    intra = fetch_ohlc(item["symbol"], "5m")
+    d_closes = [c for c in (daily.get("close") or []) if c is not None]
+    closes = [c for c in (intra.get("close") or []) if c is not None] or d_closes
+    highs = [h for h in (intra.get("high") or daily.get("high") or []) if h is not None]
+    lows = [x for x in (intra.get("low") or daily.get("low") or []) if x is not None]
+    vols = [v for v in (intra.get("volume") or daily.get("volume") or []) if v is not None]
+    q = yahoo_price(item["symbol"])
+    price = q.get("price") or (closes[-1] if closes else None)
+    if not price or len(closes) < 10:
+        return {
+            "symbol": item["symbol"], "tv": item["tv"], "name": item["name"], "group": item["group"],
+            "price": price, "score": 0, "side": "NONE", "setup": "No data", "levels": None,
+        }
+    buy, br, rsi_b, chg = score_side(closes, highs, vols, price, "BUY")
+    sell, sr, rsi_s, _ = score_side(closes, highs, vols, price, "SELL")
+    if buy >= sell:
+        side, score, reasons = "BUY", buy, br
+    else:
+        side, score, reasons = "SELL", sell, sr
+    a = fx_atr(highs or closes, lows or closes, closes)
+    if not a:
+        a = price * 0.008
+    if side == "BUY":
+        entry, stop, tp1, tp2 = price, price - 1.2 * a, price + 1.5 * a, price + 2.4 * a
+    else:
+        entry, stop, tp1, tp2 = price, price + 1.2 * a, price - 1.5 * a, price - 2.4 * a
+    setup = "Strong " + side if score >= 70 else ("Watch " + side if score >= 55 else "Weak")
+    return {
+        "symbol": item["symbol"],
+        "tv": item["tv"],
+        "name": item["name"],
+        "group": item["group"],
+        "price": price,
+        "change_pct": q.get("change_pct") if q.get("change_pct") is not None else chg,
+        "rsi": rsi_b,
+        "score": score,
+        "side": side,
+        "setup": setup,
+        "reasons": reasons[:4],
+        "levels": {
+            "entry": round(entry, 6),
+            "stop": round(stop, 6),
+            "tp1": round(tp1, 6),
+            "tp2": round(tp2, 6),
+        },
+    }
+
+
+def fx_tape():
+    rows = []
+    for sym in ("GC=F", "CL=F", "BTC-USD", "EURUSD=X"):
+        q = yahoo_price(sym)
+        rows.append((sym, q.get("change_pct")))
+    chgs = [c for _, c in rows if c is not None]
+    risk_on = 50
+    notes = []
+    for sym, c in rows:
+        if c is None:
+            continue
+        notes.append(f"{sym} {c:+.2f}%")
+        if sym == "BTC-USD":
+            risk_on += max(-12, min(12, c))
+        elif sym == "GC=F":
+            risk_on += max(-8, min(8, -c * 0.4))
+        elif sym == "CL=F":
+            risk_on += max(-8, min(8, c * 0.5))
+        elif sym == "EURUSD=X":
+            risk_on += max(-6, min(6, c * 2))
+    risk_on = int(max(8, min(92, risk_on)))
+    if risk_on >= 60:
+        label, stance = "Risk-on / buyers", "OK to take strongest BUY if score high"
+    elif risk_on <= 40:
+        label, stance = "Risk-off / sellers", "Prefer strongest SELL or stay flat"
+    else:
+        label, stance = "Mixed metals/FX tape", "Only take a clear 70+ setup"
+    return {"buyers": risk_on, "sellers": 100 - risk_on, "label": label, "stance": stance, "notes": notes}
+
+
+def load_fx_paper():
+    path = FX_PAPER if FX_PAPER.exists() else (STATIC / "fx-paper.json")
+    if not path.exists():
+        return {"trades": [], "open": None}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"trades": [], "open": None}
+
+
+def save_fx_paper(data):
+    text = json.dumps(data, indent=2)
+    FX_PAPER.write_text(text, encoding="utf-8")
+    try:
+        (STATIC / "fx-paper.json").write_text(text, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def fx_update_paper(top, tape):
+    """One paper trade per 4-hour daytime slot (+04): 08:00, 12:00, 16:00."""
+    book = load_fx_paper()
+    now = user_now()
+    today = now.strftime("%Y-%m-%d")
+    hour = now.hour
+    slots = (8, 12, 16)
+    daytime = 8 <= hour < 20
+    slot = None
+    for s in slots:
+        if s <= hour < s + 4:
+            slot = s
+            break
+    slot_id = f"{today}-{slot:02d}" if slot is not None else None
+    pos = book.get("open")
+
+    def close_pos(pos, last, why):
+        signed = 1 if pos.get("side") == "BUY" else -1
+        points = signed * (last - pos["open_price"])
+        pct = signed * (last - pos["open_price"]) / pos["open_price"] * 100 if pos.get("open_price") else 0
+        book["trades"].append({
+            "symbol": pos["symbol"],
+            "name": pos.get("name"),
+            "group": pos.get("group"),
+            "side": pos.get("side"),
+            "date": pos.get("date"),
+            "slot": pos.get("slot"),
+            "open_price": pos["open_price"],
+            "close_price": last,
+            "exit": why,
+            "points": round(points, 6),
+            "pct": round(pct, 3),
+            "pnl": round(pct, 3),
+        })
+        book["open"] = None
+
+    if pos:
+        q = yahoo_price(pos["symbol"])
+        last = q.get("price")
+        if last is not None:
+            pos["last"] = last
+            tp, sl, side = pos.get("tp1"), pos.get("stop"), pos.get("side")
+            hit = None
+            if side == "BUY":
+                if tp and last >= tp:
+                    hit = "TP1"
+                elif sl and last <= sl:
+                    hit = "SL"
+            else:
+                if tp and last <= tp:
+                    hit = "TP1"
+                elif sl and last >= sl:
+                    hit = "SL"
+            if slot_id and pos.get("slot_id") and slot_id != pos.get("slot_id"):
+                hit = hit or "SLOT"
+            if not daytime and hour >= 20:
+                hit = hit or "EOD"
+            if hit:
+                close_pos(pos, last, hit)
+            else:
+                book["open"] = pos
+        save_fx_paper(book)
+        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+        return book
+
+    done = any(t.get("slot_id") == slot_id or (t.get("date") == today and t.get("slot") == slot) for t in book.get("trades") or [])
+    if pos and pos.get("slot_id") == slot_id:
+        done = True
+    buyers = (tape or {}).get("buyers") or 50
+    if not daytime or slot is None:
+        book["skipped"] = f"outside daytime slots 08/12/16 +04 — clock {now.strftime('%H:%M +04')}"
+        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+        return book
+    if done:
+        book["skipped"] = f"already logged slot {slot:02d}:00 +04"
+        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+        return book
+    if not top:
+        book["skipped"] = "no ranked market"
+        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+        return book
+    idea = top[0]
+    if (idea.get("score") or 0) < 58:
+        book["skipped"] = f"best score {idea.get('score')} < 58 — no trade this slot"
+        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+        return book
+    lv = idea.get("levels") or {}
+    px = idea.get("price") or lv.get("entry")
+    book["open"] = {
+        "symbol": idea["symbol"],
+        "tv": idea.get("tv"),
+        "name": idea.get("name"),
+        "group": idea.get("group"),
+        "side": idea.get("side"),
+        "date": today,
+        "slot": slot,
+        "slot_id": slot_id,
+        "open_price": float(px),
+        "tp1": lv.get("tp1"),
+        "stop": lv.get("stop"),
+        "last": float(px),
+        "opened_at": now.strftime("%H:%M +04"),
+        "tape": buyers,
+    }
+    save_fx_paper(book)
+    book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+    book["skipped"] = None
+    book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
+    return book
+
+
+def rank_fx():
+    ranked = []
+    for item in FX_BOOK:
+        try:
+            ranked.append(fx_score_one(item))
+        except Exception as e:
+            ranked.append({
+                "symbol": item["symbol"], "tv": item["tv"], "name": item["name"],
+                "group": item["group"], "score": 0, "side": "NONE", "setup": str(e),
+            })
+        time.sleep(0.04)
+    ranked.sort(key=lambda x: x.get("score") or 0, reverse=True)
+    for i, row in enumerate(ranked, 1):
+        row["rank"] = i
+    return ranked
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC), **kwargs)
@@ -1429,12 +1754,42 @@ class Handler(SimpleHTTPRequestHandler):
             book["cumulative"] = paper_cum(book.get("trades") or [])
             return self._json(book)
 
+        if path == "/api/fx/tape":
+            try:
+                return self._json({"ok": True, **fx_tape()})
+            except Exception as e:
+                return self._json({"ok": False, "buyers": 50, "sellers": 50, "label": str(e)})
+
+        if path == "/api/fx/ideas":
+            ranked = rank_fx()
+            tape = fx_tape()
+            paper = fx_update_paper(ranked, tape)
+            return self._json({
+                "results": ranked,
+                "count": len(ranked),
+                "market": tape,
+                "paper": paper,
+                "note": "Metals, FX, coins, oil. Rank is best BUY or SELL right now. Paper every 4h at 08/12/16 +04.",
+            })
+
+        if path == "/api/fx/paper":
+            book = load_fx_paper()
+            book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+            book["server_local"] = user_now().strftime("%Y-%m-%d %H:%M +04")
+            return self._json(book)
+
         if path == "/ideas" or path == "/ideas.html":
             self.path = "/ideas.html"
             return super().do_GET()
 
         if path == "/history" or path == "/history.html":
             self.path = "/history.html"
+            return super().do_GET()
+        if path in ("/fx", "/fx.html"):
+            self.path = "/fx.html"
+            return super().do_GET()
+        if path in ("/fx-history", "/fx-history.html"):
+            self.path = "/fx-history.html"
             return super().do_GET()
 
         if path == "/" or path == "/index.html":
