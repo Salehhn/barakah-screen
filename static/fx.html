@@ -50,7 +50,7 @@
     </nav>
     <p class="meta">Ranks gold, silver, copper, platinum, WTI, Brent, majors, BTC/ETH/SOL/XRP. Each name is scored for <b>BUY and SELL</b>; the stronger side wins. Paper trade every 4 hours at 08:00 / 12:00 / 16:00 (+04).</p>
     <button id="go">Rank now</button>
-    <label class="meta"><input id="live" type="checkbox" checked /> Auto every 15 min</label>
+    <label class="meta"><input id="live" type="checkbox" checked /> Auto every 1 min</label>
     <div class="meta" id="clock"></div>
     <div class="tape-box">
       <div class="meta"><b>Tape</b> · Gold / Oil / BTC / EUR</div>
@@ -65,6 +65,10 @@
     <div id="paper" class="tape-box">
       <div class="meta"><b>Paper this slot</b> · 08 / 12 / 16 +04 · 1 unit · % points</div>
       <div class="meta" id="paperSum">—</div>
+    </div>
+    <div id="chartBox" class="tape-box">
+      <div class="meta" id="chartLab">Live chart — click a name. Ticks come from TradingView.</div>
+      <div id="tv" style="height:420px;margin-top:8px"></div>
     </div>
     <div id="list" class="meta">Click Rank now.</div>
   </main>
@@ -97,7 +101,7 @@ $("go").onclick = async () => {
   $("list").innerHTML = `<div class="chart">${rows.map(x=>{
     const L = x.levels || {};
     const href = "https://www.tradingview.com/chart/?symbol="+encodeURIComponent(x.tv||x.symbol);
-    return `<div class="row ${x.side||""}">
+    return `<div class="row ${x.side||""}" data-tv="${x.tv||x.symbol}" data-name="${x.name||x.symbol}">
       <div class="lab">#${x.rank} <a class="sym" href="${href}" target="_blank">${x.name||x.symbol}</a>
         <small>${x.group||""} · <span class="side ${x.side}">${x.side||""}</span> ${x.setup||""}</small></div>
       <div class="track"><div class="fill" style="width:${Math.max(6,(x.score||0)/maxS*100)}%"></div></div>
@@ -107,11 +111,32 @@ $("go").onclick = async () => {
         ${x.change_pct!=null?(" · "+Number(x.change_pct).toFixed(2)+"%"):""}</div>
     </div>`;
   }).join("")}</div>`;
+  $("list").querySelectorAll(".row").forEach(row=>{
+    row.style.cursor = "pointer";
+    row.onclick = () => showChart(row.dataset.tv, row.dataset.name);
+  });
+  if (rows[0]) showChart(rows[0].tv||rows[0].symbol, rows[0].name);
   $("clock").textContent = "Updated " + new Date().toLocaleTimeString();
 };
+function showChart(tvSym, title) {
+  $("chartLab").textContent = "Live: " + (title||tvSym) + " · TradingView (ticks while the market is open)";
+  $("tv").innerHTML = "";
+  const s = document.createElement("script");
+  s.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+  s.async = true;
+  s.text = JSON.stringify({
+    autosize: false, height: 420, width: "100%",
+    symbol: tvSym, interval: "5", timezone: "Asia/Dubai",
+    theme: "dark", style: "1", locale: "en",
+    hide_top_toolbar: false, allow_symbol_change: true,
+    calendar: false, support_host: "https://www.tradingview.com"
+  });
+  $("tv").appendChild(s);
+}
 loadTape();
+showChart("XAUUSD", "Gold");
 $("go").click();
-setInterval(()=>{ if ($("live").checked) $("go").click(); }, 15*60*1000);
+setInterval(()=>{ if ($("live").checked) $("go").click(); }, 60*1000);
 </script>
 </body>
 </html>
