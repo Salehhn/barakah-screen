@@ -48,7 +48,7 @@
       <a href="/fx.html">Metals / FX / Oil</a>
       <a href="/fx-history.html">Historical trades</a>
     </nav>
-    <p class="meta">Ranks gold, silver, copper, platinum, WTI, Brent, majors, BTC/ETH/SOL/XRP. Each name is scored for <b>BUY and SELL</b>; the stronger side wins. Paper trade every 4 hours at 08:00 / 12:00 / 16:00 (+04).</p>
+    <p class="meta">Ranks gold, silver, copper, platinum, WTI, Brent, majors, BTC/ETH/SOL/XRP. BUY or SELL. Paper every 15 min while this page is open (08:00–20:00 +04).</p>
     <button id="go">Rank now</button>
     <label class="meta"><input id="live" type="checkbox" checked /> Auto every 1 min</label>
     <div class="meta" id="clock"></div>
@@ -63,7 +63,7 @@
   </header>
   <main>
     <div id="paper" class="tape-box">
-      <div class="meta"><b>Paper this slot</b> · 08 / 12 / 16 +04 · 1 unit · % points</div>
+      <div class="meta"><b>Paper</b> · every 15 min 08:00–20:00 +04 while this page is open · % points</div>
       <div class="meta" id="paperSum">—</div>
     </div>
     <div id="chartBox" class="tape-box">
@@ -91,8 +91,10 @@ $("go").onclick = async () => {
   paintTape(r.market||{});
   const p = r.paper || {};
   $("paperSum").textContent = (p.open
-      ? ("OPEN "+p.open.side+" "+(p.open.name||p.open.symbol)+" @ "+p.open.open_price)
-      : "No open slot trade")
+      ? ("OPEN "+p.open.side+" "+(p.open.name||p.open.symbol)+" @ "+p.open.open_price
+         +" · live "+((p.open.live_pct>=0)?"+":"")+(p.open.live_pct||0)+"%")
+      : "No open trade")
+    + " · trades " + ((p.closed_count||0)+(p.open?1:0))
     + " · cum % " + (p.cumulative!=null?p.cumulative:0)
     + (p.server_local ? " · "+p.server_local : "")
     + (p.skipped ? " · "+p.skipped : "");
@@ -106,8 +108,8 @@ $("go").onclick = async () => {
         <small>${x.group||""} · <span class="side ${x.side}">${x.side||""}</span> ${x.setup||""}</small></div>
       <div class="track"><div class="fill" style="width:${Math.max(6,(x.score||0)/maxS*100)}%"></div></div>
       <div class="pts">${x.score??"—"}</div>
-      <div class="lv">last ${x.price!=null?Number(x.price):"—"}
-        · Entry ${L.entry??"—"} · TP1 ${L.tp1??"—"} · SL ${L.stop??"—"}
+      <div class="lv">${x.side==="SELL"?"SELL now @":"BUY now @"} ${x.price!=null?Number(x.price):"—"}
+        · SL ${L.stop??"—"} · TP1 ${L.tp1??"—"}
         ${x.change_pct!=null?(" · "+Number(x.change_pct).toFixed(2)+"%"):""}</div>
     </div>`;
   }).join("")}</div>`;

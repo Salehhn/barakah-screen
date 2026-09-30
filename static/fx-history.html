@@ -14,8 +14,9 @@
     table { width:100%; border-collapse:collapse; margin-top:12px; }
     th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); font-size:13px; }
     .win { color:var(--buy); } .loss { color:var(--sell); }
-    .tot { margin-top:16px; font-size:20px; color:var(--gold2); }
+    .tot { margin-top:16px; font-size:22px; color:var(--gold2); }
     .openbox { background:#102033; border:1px solid #d4b46a; border-radius:12px; padding:12px; margin:12px 0; }
+    .stat { font-size:16px; color:var(--gold2); margin:8px 0; }
   </style>
 </head>
 <body>
@@ -26,39 +27,49 @@
       <a href="/fx-history.html">Historical trades</a>
       <a href="/ideas.html">Stock ideas</a>
     </nav>
-    <p class="meta">Paper log: one unit of the top-ranked BUY or SELL at 08:00, 12:00 and 16:00 (+04). Points = % move in the trade direction.</p>
+    <p class="meta">Paper log: top BUY or SELL every 15 minutes while /fx.html is open (08:00–20:00 +04). Points = % in the trade direction. This page refreshes live.</p>
   </header>
   <main>
+    <div class="stat" id="count">Trades: 0</div>
     <div id="open"></div>
     <div id="log" class="meta">Loading…</div>
     <div class="tot" id="cum"></div>
   </main>
 <script>
 function n(x,d){ if(x==null||Number.isNaN(Number(x))) return "—"; return Number(x).toFixed(d); }
-fetch("/api/fx/paper?_="+Date.now()).then(r=>r.json()).then(p=>{
+function paint(p){
   const op = p.open;
-  if (op) {
-    document.getElementById("open").innerHTML = `<div class="openbox">
-      <b>Open</b> ${op.side} ${op.name||op.symbol} · slot ${op.slot}:00 +04 ${op.date||""}
-      · open ${op.open_price} · last ${op.last} · TP1 ${op.tp1} · SL ${op.stop}
-    </div>`;
-  }
   const rows = (p.trades||[]).slice().reverse();
+  const nClosed = p.closed_count != null ? p.closed_count : rows.length;
+  const nOpen = op ? 1 : 0;
+  document.getElementById("count").textContent = "Trades listed: " + (nClosed + nOpen) + "  (closed " + nClosed + (nOpen?" + 1 open":"") + ")";
+  if (op) {
+    const live = op.live_pct != null ? op.live_pct : 0;
+    const cls = live>=0?"win":"loss";
+    document.getElementById("open").innerHTML = `<div class="openbox">
+      <b>Open now</b> ${op.side} ${op.name||op.symbol} · slot ${op.slot||""} ${op.date||""}<br>
+      open ${op.open_price} · last ${op.last} · TP1 ${op.tp1} · SL ${op.stop}<br>
+      Live points <span class="${cls}">${live>=0?"+":""}${n(live,3)}%</span>
+    </div>`;
+  } else {
+    document.getElementById("open").innerHTML = "";
+  }
   if (!rows.length && !op) {
-    document.getElementById("log").textContent = "No slot trades yet. Open /fx.html during 08–20 +04.";
+    document.getElementById("log").textContent = "No trades yet. Keep /fx.html open 08–20 +04.";
     document.getElementById("cum").textContent = "Cumulative points 0%";
     return;
   }
   document.getElementById("log").innerHTML = `<table>
     <thead><tr>
-      <th>Date</th><th>Slot</th><th>Market</th><th>Side</th>
+      <th>#</th><th>Date</th><th>Slot</th><th>Market</th><th>Side</th>
       <th>Open</th><th>Close</th><th>Exit</th><th>Points %</th>
     </tr></thead>
-    <tbody>${rows.map(t=>{
+    <tbody>${rows.map((t,i)=>{
       const cls = (t.pct||0)>=0?"win":"loss";
       return `<tr>
+        <td>${rows.length-i}</td>
         <td>${t.date||""}</td>
-        <td>${t.slot!=null?(t.slot+":00"):""}</td>
+        <td>${t.slot!=null?t.slot:""}</td>
         <td><b>${t.name||t.symbol}</b> <span class="meta">${t.group||""}</span></td>
         <td class="${t.side}">${t.side||""}</td>
         <td>${t.open_price??""}</td>
@@ -68,9 +79,16 @@ fetch("/api/fx/paper?_="+Date.now()).then(r=>r.json()).then(p=>{
       </tr>`;
     }).join("")}</tbody></table>`;
   const cum = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pct||0),0);
-  document.getElementById("cum").innerHTML = `Cumulative points <b>${cum>=0?"+":""}${n(cum,3)}%</b>
-    <div class="meta">${p.server_local||""}</div>`;
-}).catch(e=>{ document.getElementById("log").textContent = String(e); });
+  const ccls = cum>=0?"win":"loss";
+  document.getElementById("cum").innerHTML = `Cumulative points <span class="${ccls}"><b>${cum>=0?"+":""}${n(cum,3)}%</b></span>
+    <div class="meta">${p.server_local||""} · includes open trade if any</div>`;
+}
+async function tick(){
+  try { paint(await fetch("/api/fx/paper?_="+Date.now()).then(r=>r.json())); }
+  catch(e){ document.getElementById("log").textContent = String(e); }
+}
+tick();
+setInterval(tick, 15000);
 </script>
 </body>
 </html>
