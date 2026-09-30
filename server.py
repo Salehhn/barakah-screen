@@ -332,7 +332,7 @@ def http_get_ua(url: str, ua: str, timeout: int = 25) -> bytes:
     raise last
 
 
-def yahoo_price(symbol: str):
+def yahoo_price(symbol: str, ttl: int = 900):
     def fetch():
         # Yahoo is picky about UA + rate limits; try a browser UA then Twelve Data demo.
         last_err = None
@@ -374,7 +374,7 @@ def yahoo_price(symbol: str):
         raise RuntimeError(f"price feed failed: {last_err}")
 
     try:
-        return cached_json(f"yahoo_{symbol}.json", fetch, ttl=900)
+        return cached_json(f"yahoo_{symbol}.json", fetch, ttl=ttl)
     except Exception as e:
         return {"error": str(e), "price": None, "name": symbol}
 
@@ -405,7 +405,7 @@ def rsi(closes, n=14):
 
 TF_MAP = {
     "1d": ("1d", "6mo", 280),
-    "5m": ("5m", "5d", 50),
+    "5m": ("5m", "5d", 45),
     "1m": ("1m", "1d", 40),
 }
 
@@ -1345,7 +1345,7 @@ def fx_score_one(item, tf="1h"):
     highs = [h for h in (intra.get("high") or daily.get("high") or []) if h is not None]
     lows = [x for x in (intra.get("low") or daily.get("low") or []) if x is not None]
     vols = [v for v in (intra.get("volume") or daily.get("volume") or []) if v is not None]
-    q = yahoo_price(item["symbol"])
+    q = yahoo_price(item["symbol"], ttl=40)
     price = q.get("price") or (closes[-1] if closes else None)
     if not price or len(closes) < 10:
         return {
