@@ -105,7 +105,7 @@ $("go").onclick = async () => {
     const href = "https://www.tradingview.com/chart/?symbol="+encodeURIComponent(x.tv||x.symbol);
     return `<div class="row ${x.side||""}" data-tv="${x.tv||x.symbol}" data-name="${x.name||x.symbol}">
       <div class="lab">#${x.rank} <a class="sym" href="${href}" target="_blank">${x.name||x.symbol}</a>
-        <small>${x.group||""} · <span class="side ${x.side}">${x.side||""}</span> ${x.setup||""}</small></div>
+        <small>${x.group||""} · <span class="side ${x.side}">${x.side||""}</span> ${x.setup||""} · B ${x.buy_score??"—"} / S ${x.sell_score??"—"}</small></div>
       <div class="track"><div class="fill" style="width:${Math.max(6,(x.score||0)/maxS*100)}%"></div></div>
       <div class="pts">${x.score??"—"}</div>
       <div class="lv">${x.side==="SELL"?"SELL now @":"BUY now @"} ${x.price!=null?Number(x.price):"—"}
