@@ -23,22 +23,22 @@ FX_PAPER = CACHE / "fx-paper.json"
 SHARES = 100  # paper size per theoretical open
 
 FX_BOOK = [
-    {"symbol": "GC=F", "tv": "XAUUSD", "name": "Gold", "group": "Metal"},
-    {"symbol": "SI=F", "tv": "XAGUSD", "name": "Silver", "group": "Metal"},
-    {"symbol": "HG=F", "tv": "HG1!", "name": "Copper", "group": "Metal"},
-    {"symbol": "PL=F", "tv": "XPTUSD", "name": "Platinum", "group": "Metal"},
-    {"symbol": "CL=F", "tv": "USOIL", "name": "WTI Oil", "group": "Oil"},
-    {"symbol": "BZ=F", "tv": "UKOIL", "name": "Brent Oil", "group": "Oil"},
-    {"symbol": "EURUSD=X", "tv": "EURUSD", "name": "EUR/USD", "group": "Forex"},
-    {"symbol": "GBPUSD=X", "tv": "GBPUSD", "name": "GBP/USD", "group": "Forex"},
-    {"symbol": "USDJPY=X", "tv": "USDJPY", "name": "USD/JPY", "group": "Forex"},
-    {"symbol": "AUDUSD=X", "tv": "AUDUSD", "name": "AUD/USD", "group": "Forex"},
-    {"symbol": "USDCAD=X", "tv": "USDCAD", "name": "USD/CAD", "group": "Forex"},
-    {"symbol": "USDCHF=X", "tv": "USDCHF", "name": "USD/CHF", "group": "Forex"},
-    {"symbol": "BTC-USD", "tv": "BTCUSD", "name": "Bitcoin", "group": "Coin"},
-    {"symbol": "ETH-USD", "tv": "ETHUSD", "name": "Ethereum", "group": "Coin"},
-    {"symbol": "SOL-USD", "tv": "SOLUSD", "name": "Solana", "group": "Coin"},
-    {"symbol": "XRP-USD", "tv": "XRPUSD", "name": "XRP", "group": "Coin"},
+    {"symbol": "XAUUSD=X", "tv": "XAUUSD", "name": "Gold", "group": "Metal", "pip": 0.01},
+    {"symbol": "XAGUSD=X", "tv": "XAGUSD", "name": "Silver", "group": "Metal", "pip": 0.01},
+    {"symbol": "EURJPY=X", "tv": "EURJPY", "name": "EUR/JPY", "group": "Forex", "pip": 0.01},
+    {"symbol": "PL=F", "tv": "XPTUSD", "name": "Platinum", "group": "Metal", "pip": 0.10},
+    {"symbol": "CL=F", "tv": "USOIL", "name": "WTI Oil", "group": "Oil", "pip": 0.01},
+    {"symbol": "BZ=F", "tv": "UKOIL", "name": "Brent Oil", "group": "Oil", "pip": 0.01},
+    {"symbol": "EURUSD=X", "tv": "EURUSD", "name": "EUR/USD", "group": "Forex", "pip": 0.0001},
+    {"symbol": "GBPUSD=X", "tv": "GBPUSD", "name": "GBP/USD", "group": "Forex", "pip": 0.0001},
+    {"symbol": "USDJPY=X", "tv": "USDJPY", "name": "USD/JPY", "group": "Forex", "pip": 0.01},
+    {"symbol": "AUDUSD=X", "tv": "AUDUSD", "name": "AUD/USD", "group": "Forex", "pip": 0.0001},
+    {"symbol": "USDCAD=X", "tv": "USDCAD", "name": "USD/CAD", "group": "Forex", "pip": 0.0001},
+    {"symbol": "USDCHF=X", "tv": "USDCHF", "name": "USD/CHF", "group": "Forex", "pip": 0.0001},
+    {"symbol": "BTC-USD", "tv": "BTCUSD", "name": "Bitcoin", "group": "Coin", "pip": 1.0},
+    {"symbol": "ETH-USD", "tv": "ETHUSD", "name": "Ethereum", "group": "Coin", "pip": 0.1},
+    {"symbol": "SOL-USD", "tv": "SOLUSD", "name": "Solana", "group": "Coin", "pip": 0.01},
+    {"symbol": "XRP-USD", "tv": "XRPUSD", "name": "XRP", "group": "Coin", "pip": 0.0001},
 ]
 SPUS_CSV = "https://www.sp-funds.com/wp-content/uploads/data/TidalFG_Holdings_SPUS.csv"
 
@@ -1457,7 +1457,7 @@ def fx_score_one(item, tf="1h"):
 
 def fx_tape():
     rows = []
-    for sym in ("GC=F", "CL=F", "BTC-USD", "EURUSD=X"):
+    for sym in ("XAUUSD=X", "CL=F", "BTC-USD", "EURUSD=X"):
         q = yahoo_price(sym)
         rows.append((sym, q.get("change_pct")))
     chgs = [c for _, c in rows if c is not None]
@@ -1469,7 +1469,7 @@ def fx_tape():
         notes.append(f"{sym} {c:+.2f}%")
         if sym == "BTC-USD":
             risk_on += max(-12, min(12, c))
-        elif sym == "GC=F":
+        elif sym == "XAUUSD=X":
             risk_on += max(-8, min(8, -c * 0.4))
         elif sym == "CL=F":
             risk_on += max(-8, min(8, c * 0.5))
@@ -1514,11 +1514,42 @@ def fx_slot_now(now):
     return daytime, slot_id, slot_label
 
 
+def pip_size_of(symbol: str, item=None):
+    if item and item.get("pip"):
+        return float(item["pip"])
+    s = (symbol or "").upper()
+    for row in FX_BOOK:
+        if row["symbol"] == symbol or row.get("tv") == symbol:
+            return float(row.get("pip") or 0.0001)
+    if "JPY" in s:
+        return 0.01
+    if "XAU" in s or s == "GC=F":
+        return 0.01
+    if "XAG" in s or s == "SI=F":
+        return 0.01
+    if s in ("CL=F", "BZ=F") or "OIL" in s:
+        return 0.01
+    if "BTC" in s:
+        return 1.0
+    if "ETH" in s:
+        return 0.1
+    if s.endswith("=X"):
+        return 0.0001
+    return 0.0001
+
+
+def to_pips(symbol, move, item=None):
+    ps = pip_size_of(symbol, item)
+    if not ps:
+        return 0.0
+    return round(move / ps, 1)
+
+
 def fx_mark(pos, last):
     if not pos or last is None or not pos.get("open_price"):
         return 0.0
     signed = 1 if pos.get("side") == "BUY" else -1
-    return round(signed * (last - pos["open_price"]) / pos["open_price"] * 100, 3)
+    return to_pips(pos.get("symbol"), signed * (last - pos["open_price"]))
 
 
 def fx_update_paper(top, tape):
@@ -1532,8 +1563,9 @@ def fx_update_paper(top, tape):
 
     def close_pos(pos, last, why):
         signed = 1 if pos.get("side") == "BUY" else -1
-        points = signed * (last - pos["open_price"])
-        pct = signed * (last - pos["open_price"]) / pos["open_price"] * 100 if pos.get("open_price") else 0
+        move = signed * (last - pos["open_price"])
+        pips = to_pips(pos.get("symbol"), move)
+        pct = move / pos["open_price"] * 100 if pos.get("open_price") else 0
         book["trades"].append({
             "symbol": pos["symbol"],
             "name": pos.get("name"),
@@ -1545,9 +1577,10 @@ def fx_update_paper(top, tape):
             "open_price": pos["open_price"],
             "close_price": last,
             "exit": why,
-            "points": round(points, 6),
+            "points": pips,
+            "pips": pips,
             "pct": round(pct, 3),
-            "pnl": round(pct, 3),
+            "pnl": pips,
         })
         book["open"] = None
 
@@ -1584,11 +1617,12 @@ def fx_update_paper(top, tape):
                 close_pos(pos, last, hit)
             else:
                 pos["live_pct"] = fx_mark(pos, last)
+                pos["live_pips"] = pos["live_pct"]
                 book["open"] = pos
         save_fx_paper(book)
-        closed = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
-        live = (book.get("open") or {}).get("live_pct") or 0
-        book["cumulative"] = round(closed + live, 3)
+        closed = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
+        live = (book.get("open") or {}).get("live_pips") or (book.get("open") or {}).get("live_pct") or 0
+        book["cumulative"] = round(closed + live, 1)
         book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
@@ -1597,12 +1631,12 @@ def fx_update_paper(top, tape):
     buyers = (tape or {}).get("buyers") or 50
     if not daytime:
         book["skipped"] = f"outside daytime 08:00–20:00 +04 — clock {now.strftime('%H:%M +04')}"
-        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     if done:
         book["skipped"] = f"already logged slot {slot_label} +04"
-        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
         book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
@@ -1613,7 +1647,7 @@ def fx_update_paper(top, tape):
     idea = next((x for x in top if x.get("side") in ("BUY", "SELL") and (x.get("score") or 0) >= 58), None)
     if not idea:
         book["skipped"] = "no clear side (no-trade band or score < 58)"
-        book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
         book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
@@ -1633,11 +1667,12 @@ def fx_update_paper(top, tape):
         "stop": lv.get("stop"),
         "last": float(px),
         "live_pct": 0,
+        "live_pips": 0,
         "opened_at": now.strftime("%H:%M +04"),
         "tape": buyers,
     }
     save_fx_paper(book)
-    book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+    book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
     book["skipped"] = None
     book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
     return book
@@ -1876,11 +1911,12 @@ class Handler(SimpleHTTPRequestHandler):
                 if last is not None:
                     op["last"] = last
                     op["live_pct"] = fx_mark(op, last)
+                    op["live_pips"] = op["live_pct"]
                     book["open"] = op
                     save_fx_paper(book)
-            closed = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
-            live = (book.get("open") or {}).get("live_pct") or 0
-            book["cumulative"] = round(closed + live, 3)
+            closed = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
+            live = (book.get("open") or {}).get("live_pips") or (book.get("open") or {}).get("live_pct") or 0
+            book["cumulative"] = round(closed + live, 1)
             book["closed_count"] = len(book.get("trades") or [])
             book["server_local"] = user_now().strftime("%Y-%m-%d %H:%M +04")
             return self._json(book)
