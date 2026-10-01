@@ -48,7 +48,7 @@
       <a href="/fx.html">Metals / FX / Oil</a>
       <a href="/fx-history.html">Historical trades</a>
     </nav>
-    <p class="meta">Ranks gold, silver, platinum, WTI, Brent, majors + EURJPY, BTC/ETH/SOL/XRP. BUY or SELL. Paper holds to SL/TP. P/L in pips. Gold uses spot XAUUSD.</p>
+    <p class="meta">Ranks gold, silver, platinum, oil, FX + EURJPY, coins. Paper 05:00–15:00 Muscat. P/L in pips. Gold is spot XAUUSD.</p>
     <button id="go">Rank now</button>
     <label class="meta"><input id="live" type="checkbox" checked /> Auto every 1 min</label>
     <div class="meta" id="clock"></div>
@@ -63,7 +63,7 @@
   </header>
   <main>
     <div id="paper" class="tape-box">
-      <div class="meta"><b>Paper</b> · every 15 min 08:00–20:00 +04 while this page is open · % points</div>
+      <div class="meta"><b>Paper</b> · 05:00–15:00 Muscat while this page is open · pips</div>
       <div class="meta" id="paperSum">—</div>
     </div>
     <div id="chartBox" class="tape-box">
@@ -92,10 +92,11 @@ $("go").onclick = async () => {
   const p = r.paper || {};
   $("paperSum").textContent = (p.open
       ? ("OPEN "+p.open.side+" "+(p.open.name||p.open.symbol)+" @ "+p.open.open_price
-         +" · live "+((p.open.live_pips>=0||p.open.live_pct>=0)?"+":"")+(p.open.live_pips!=null?p.open.live_pips:p.open.live_pct||0)+" pips")
+         +" · live "+((Number(p.open.live_pips||0)>=0)?"+":"")+(p.open.live_pips!=null?p.open.live_pips:0)+" pips")
       : "No open trade")
     + " · trades " + ((p.closed_count||0)+(p.open?1:0))
-    + " · cum " + (p.cumulative!=null?p.cumulative:0) + " pips"
+    + " · today " + (p.daily_cumulative!=null?p.daily_cumulative:0) + " pips"
+    + " · total " + (p.cumulative!=null?p.cumulative:0) + " pips"
     + (p.server_local ? " · "+p.server_local : "")
     + (p.skipped ? " · "+p.skipped : "");
   const rows = r.results || [];
