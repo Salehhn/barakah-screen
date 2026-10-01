@@ -48,7 +48,7 @@
       <a href="/fx.html">Metals / FX / Oil</a>
       <a href="/fx-history.html">Historical trades</a>
     </nav>
-    <p class="meta">Ranks gold, silver, copper, platinum, WTI, Brent, majors, BTC/ETH/SOL/XRP. BUY or SELL. Paper every 15 min while this page is open (08:00–20:00 +04).</p>
+    <p class="meta">Ranks gold, silver, platinum, WTI, Brent, majors + EURJPY, BTC/ETH/SOL/XRP. BUY or SELL. Paper holds to SL/TP. P/L in pips. Gold uses spot XAUUSD.</p>
     <button id="go">Rank now</button>
     <label class="meta"><input id="live" type="checkbox" checked /> Auto every 1 min</label>
     <div class="meta" id="clock"></div>
@@ -92,10 +92,10 @@ $("go").onclick = async () => {
   const p = r.paper || {};
   $("paperSum").textContent = (p.open
       ? ("OPEN "+p.open.side+" "+(p.open.name||p.open.symbol)+" @ "+p.open.open_price
-         +" · live "+((p.open.live_pct>=0)?"+":"")+(p.open.live_pct||0)+"%")
+         +" · live "+((p.open.live_pips>=0||p.open.live_pct>=0)?"+":"")+(p.open.live_pips!=null?p.open.live_pips:p.open.live_pct||0)+" pips")
       : "No open trade")
     + " · trades " + ((p.closed_count||0)+(p.open?1:0))
-    + " · cum % " + (p.cumulative!=null?p.cumulative:0)
+    + " · cum " + (p.cumulative!=null?p.cumulative:0) + " pips"
     + (p.server_local ? " · "+p.server_local : "")
     + (p.skipped ? " · "+p.skipped : "");
   const rows = r.results || [];

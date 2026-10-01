@@ -27,7 +27,7 @@
       <a href="/fx-history.html">Historical trades</a>
       <a href="/ideas.html">Stock ideas</a>
     </nav>
-    <p class="meta">Paper log: top BUY or SELL every 15 minutes while /fx.html is open (08:00–20:00 +04). Points = % in the trade direction. This page refreshes live.</p>
+    <p class="meta">Paper log while /fx.html is open (08:00–20:00 +04). Points are <b>pips</b> (gold 0.01 = 1 pip, EURUSD 0.0001 = 1 pip, JPY 0.01 = 1 pip, BTC $1 = 1 pip). Live refresh.</p>
   </header>
   <main>
     <div class="stat" id="count">Trades: 0</div>
@@ -44,28 +44,29 @@ function paint(p){
   const nOpen = op ? 1 : 0;
   document.getElementById("count").textContent = "Trades listed: " + (nClosed + nOpen) + "  (closed " + nClosed + (nOpen?" + 1 open":"") + ")";
   if (op) {
-    const live = op.live_pct != null ? op.live_pct : 0;
+    const live = op.live_pips != null ? op.live_pips : (op.live_pct != null ? op.live_pct : 0);
     const cls = live>=0?"win":"loss";
     document.getElementById("open").innerHTML = `<div class="openbox">
       <b>Open now</b> ${op.side} ${op.name||op.symbol} · slot ${op.slot||""} ${op.date||""}<br>
       open ${op.open_price} · last ${op.last} · TP1 ${op.tp1} · SL ${op.stop}<br>
-      Live points <span class="${cls}">${live>=0?"+":""}${n(live,3)}%</span>
+      Live <span class="${cls}">${live>=0?"+":""}${n(live,1)} pips</span>
     </div>`;
   } else {
     document.getElementById("open").innerHTML = "";
   }
   if (!rows.length && !op) {
     document.getElementById("log").textContent = "No trades yet. Keep /fx.html open 08–20 +04.";
-    document.getElementById("cum").textContent = "Cumulative points 0%";
+    document.getElementById("cum").textContent = "Cumulative 0 pips";
     return;
   }
   document.getElementById("log").innerHTML = `<table>
     <thead><tr>
       <th>#</th><th>Date</th><th>Slot</th><th>Market</th><th>Side</th>
-      <th>Open</th><th>Close</th><th>Exit</th><th>Points %</th>
+      <th>Open</th><th>Close</th><th>Exit</th><th>Pips</th>
     </tr></thead>
     <tbody>${rows.map((t,i)=>{
-      const cls = (t.pct||0)>=0?"win":"loss";
+      const pts = t.pips != null ? t.pips : t.pct;
+      const cls = (pts||0)>=0?"win":"loss";
       return `<tr>
         <td>${rows.length-i}</td>
         <td>${t.date||""}</td>
@@ -75,12 +76,12 @@ function paint(p){
         <td>${t.open_price??""}</td>
         <td>${t.close_price??""}</td>
         <td>${t.exit||""}</td>
-        <td class="${cls}">${(t.pct>=0?"+":"")+n(t.pct,3)}</td>
+        <td class="${cls}">${(pts>=0?"+":"")+n(pts,1)}</td>
       </tr>`;
     }).join("")}</tbody></table>`;
-  const cum = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pct||0),0);
+  const cum = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pips!=null?t.pips:0),0);
   const ccls = cum>=0?"win":"loss";
-  document.getElementById("cum").innerHTML = `Cumulative points <span class="${ccls}"><b>${cum>=0?"+":""}${n(cum,3)}%</b></span>
+  document.getElementById("cum").innerHTML = `Cumulative <span class="${ccls}"><b>${cum>=0?"+":""}${n(cum,1)} pips</b></span>
     <div class="meta">${p.server_local||""} · includes open trade if any</div>`;
 }
 async function tick(){
