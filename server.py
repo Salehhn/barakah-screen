@@ -1332,8 +1332,42 @@ def score_side(closes, highs, vols, price, side):
     if rel_vol and rel_vol >= 1.3:
         score += 8
         reasons.append("Volume expanding")
-    score = int(max(0, min(99, score)))
     return score, reasons, r, day_chg
+
+
+def session_vwap(closes, highs, lows, vols):
+    n = min(len(closes), 48)
+    if n < 5:
+        return None
+    c, h, l = closes[-n:], (highs or closes)[-n:], (lows or closes)[-n:]
+    v = (vols or [])[-n:]
+    if v and any(x and x > 0 for x in v) and len(v) == n:
+        num = den = 0.0
+        for i in range(n):
+            tp = ((h[i] or c[i]) + (l[i] or c[i]) + c[i]) / 3
+            vv = v[i] or 0
+            num += tp * vv
+            den += vv
+        return num / den if den else sum(c) / n
+    return sum(c) / n
+
+
+def load_fx_sides():
+    p = CACHE / "fx-sides.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_fx_sides(data):
+    (CACHE / "fx-sides.json").write_text(json.dumps(data), encoding="utf-8")
+    try:
+        (STATIC / "fx-sides.json").write_text(json.dumps(data), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def fx_score_one(item, tf="1h"):
@@ -1354,7 +1388,30 @@ def fx_score_one(item, tf="1h"):
         }
     buy, br, rsi_b, chg = score_side(closes, highs, vols, price, "BUY")
     sell, sr, rsi_s, _ = score_side(closes, highs, vols, price, "SELL")
-    if buy >= sell:
+    vw = session_vwap(closes, highs, lows, vols)
+    if vw and price:
+        if price >= vw:
+            buy += 8
+            sell -= 8
+            br.append("Above session VWAP")
+        else:
+            sell += 8
+            buy -= 8
+            sr.append("Below session VWAP")
+    buy = int(max(0, min(99, buy)))
+    sell = int(max(0, min(99, sell)))
+    prev = (load_fx_sides().get(item["symbol"]) or {}).get("side")
+    if abs(buy - sell) < 8 and max(buy, sell) < 72:
+        side, score, reasons = "NONE", max(buy, sell), ["No-trade band — BUY and SELL too close"]
+    elif buy >= sell + 10 or (buy >= sell and prev != "SELL"):
+        side, score, reasons = "BUY", buy, br
+    elif sell >= buy + 10 or (sell >= buy and prev != "BUY"):
+        side, score, reasons = "SELL", sell, sr
+    elif prev == "BUY" and sell < buy + 10:
+        side, score, reasons = "BUY", buy, br + ["Held BUY (need +10 to flip)"]
+    elif prev == "SELL" and buy < sell + 10:
+        side, score, reasons = "SELL", sell, sr + ["Held SELL (need +10 to flip)"]
+    elif buy >= sell:
         side, score, reasons = "BUY", buy, br
     else:
         side, score, reasons = "SELL", sell, sr
@@ -1362,17 +1419,27 @@ def fx_score_one(item, tf="1h"):
     if not a:
         a = price * 0.004
     a = min(a, price * 0.012)
-    if side == "BUY":
-        entry, stop, tp1, tp2 = price, price - 1.0 * a, price + 1.2 * a, price + 2.0 * a
-    else:
+    if side == "SELL":
         entry, stop, tp1, tp2 = price, price + 1.0 * a, price - 1.2 * a, price - 2.0 * a
-    setup = "Strong " + side if score >= 70 else ("Watch " + side if score >= 55 else "Weak")
+    else:
+        entry, stop, tp1, tp2 = price, price - 1.0 * a, price + 1.2 * a, price + 2.0 * a
+    if side == "NONE":
+        setup = "No trade"
+    elif score >= 70:
+        setup = "Strong " + side
+    elif score >= 55:
+        setup = "Watch " + side
+    else:
+        setup = "Weak"
     return {
         "symbol": item["symbol"],
         "tv": item["tv"],
         "name": item["name"],
         "group": item["group"],
         "price": price,
+        "vwap": round(vw, 6) if vw else None,
+        "buy_score": buy,
+        "sell_score": sell,
         "change_pct": q.get("change_pct") if q.get("change_pct") is not None else chg,
         "rsi": rsi_b,
         "score": score,
@@ -1433,6 +1500,8 @@ def save_fx_paper(data):
     FX_PAPER.write_text(text, encoding="utf-8")
     try:
         (STATIC / "fx-paper.json").write_text(text, encoding="utf-8")
+        week = STATIC / ("fx-paper-" + datetime.now(timezone.utc).strftime("%Y-W%W") + ".json")
+        week.write_text(text, encoding="utf-8")
     except Exception:
         pass
 
@@ -1499,8 +1568,16 @@ def fx_update_paper(top, tape):
                     hit = "TP1"
                 elif sl and last >= sl:
                     hit = "SL"
-            if slot_id and pos.get("slot_id") and slot_id != pos.get("slot_id"):
-                hit = hit or "SLOT"
+            # Hold until TP/SL, a +10 side flip on this symbol, or end of day — not every 15 min.
+            if top:
+                idea = top[0]
+                if idea.get("symbol") == pos.get("symbol") and idea.get("side") in ("BUY", "SELL"):
+                    if idea.get("side") != pos.get("side"):
+                        other = idea.get("sell_score") if pos.get("side") == "BUY" else idea.get("buy_score")
+                        mine = idea.get("buy_score") if pos.get("side") == "BUY" else idea.get("sell_score")
+                        if other is not None and mine is not None and other >= (mine or 0) + 10:
+                            hit = "FLIP"
+                # different #1: keep holding current until SL/TP
             if not daytime and hour >= 20:
                 hit = hit or "EOD"
             if hit:
@@ -1533,10 +1610,11 @@ def fx_update_paper(top, tape):
         book["skipped"] = "no ranked market"
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
-    idea = top[0]
-    if (idea.get("score") or 0) < 58:
-        book["skipped"] = f"best score {idea.get('score')} < 58 — no trade this slot"
+    idea = next((x for x in top if x.get("side") in ("BUY", "SELL") and (x.get("score") or 0) >= 58), None)
+    if not idea:
+        book["skipped"] = "no clear side (no-trade band or score < 58)"
         book["cumulative"] = round(sum(t.get("pct") or 0 for t in book.get("trades") or []), 3)
+        book["closed_count"] = len(book.get("trades") or [])
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     lv = idea.get("levels") or {}
@@ -1576,9 +1654,12 @@ def rank_fx():
                 "group": item["group"], "score": 0, "side": "NONE", "setup": str(e),
             })
         time.sleep(0.04)
-    ranked.sort(key=lambda x: x.get("score") or 0, reverse=True)
+    ranked.sort(key=lambda x: (0 if x.get("side") == "NONE" else 1, x.get("score") or 0), reverse=True)
+    sides = load_fx_sides()
     for i, row in enumerate(ranked, 1):
         row["rank"] = i
+        sides[row["symbol"]] = {"side": row.get("side"), "score": row.get("score")}
+    save_fx_sides(sides)
     return ranked
 
 
