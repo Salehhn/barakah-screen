@@ -1507,7 +1507,7 @@ def save_fx_paper(data):
 
 
 def fx_slot_now(now):
-    daytime = 8 <= now.hour < 20
+    daytime = 5 <= now.hour < 15
     qmin = (now.minute // 15) * 15
     slot_id = f"{now.strftime('%Y-%m-%d')}-{now.hour:02d}{qmin:02d}"
     slot_label = f"{now.hour:02d}:{qmin:02d}"
@@ -1552,8 +1552,27 @@ def fx_mark(pos, last):
     return to_pips(pos.get("symbol"), signed * (last - pos["open_price"]))
 
 
+def fx_totals(book, today=None):
+    if today is None:
+        today = user_now().strftime("%Y-%m-%d")
+    trades = book.get("trades") or []
+    total = sum((t.get("pips") if t.get("pips") is not None else 0) for t in trades)
+    daily = sum((t.get("pips") if t.get("pips") is not None else 0) for t in trades if t.get("date") == today)
+    op = book.get("open") or {}
+    live = op.get("live_pips") if op.get("live_pips") is not None else (op.get("live_pct") or 0)
+    if op:
+        total += live
+        if op.get("date") == today:
+            daily += live
+    book["cumulative"] = round(total, 1)
+    book["daily_cumulative"] = round(daily, 1)
+    book["closed_count"] = len(trades)
+    book["today"] = today
+    return book
+
+
 def fx_update_paper(top, tape):
-    """One paper trade per 15-minute daytime slot (+04, 08:00–20:00) while the page is hit."""
+    """Paper while /fx.html is open, 05:00–15:00 Muscat (+04). Hold to SL/TP."""
     book = load_fx_paper()
     now = user_now()
     today = now.strftime("%Y-%m-%d")
@@ -1611,7 +1630,7 @@ def fx_update_paper(top, tape):
                         if other is not None and mine is not None and other >= (mine or 0) + 10:
                             hit = "FLIP"
                 # different #1: keep holding current until SL/TP
-            if not daytime and hour >= 20:
+            if (not daytime) or hour >= 15:
                 hit = hit or "EOD"
             if hit:
                 close_pos(pos, last, hit)
@@ -1620,35 +1639,31 @@ def fx_update_paper(top, tape):
                 pos["live_pips"] = pos["live_pct"]
                 book["open"] = pos
         save_fx_paper(book)
-        closed = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
-        live = (book.get("open") or {}).get("live_pips") or (book.get("open") or {}).get("live_pct") or 0
-        book["cumulative"] = round(closed + live, 1)
-        book["closed_count"] = len(book.get("trades") or [])
+        fx_totals(book, today)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
 
     done = any(t.get("slot_id") == slot_id for t in book.get("trades") or [])
     buyers = (tape or {}).get("buyers") or 50
     if not daytime:
-        book["skipped"] = f"outside daytime 08:00–20:00 +04 — clock {now.strftime('%H:%M +04')}"
-        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
+        book["skipped"] = f"outside 05:00–15:00 Muscat — clock {now.strftime('%H:%M +04')}"
+        fx_totals(book, today)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     if done:
         book["skipped"] = f"already logged slot {slot_label} +04"
-        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
-        book["closed_count"] = len(book.get("trades") or [])
+        fx_totals(book, today)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     if not top:
         book["skipped"] = "no ranked market"
+        fx_totals(book, today)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     idea = next((x for x in top if x.get("side") in ("BUY", "SELL") and (x.get("score") or 0) >= 58), None)
     if not idea:
         book["skipped"] = "no clear side (no-trade band or score < 58)"
-        book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
-        book["closed_count"] = len(book.get("trades") or [])
+        fx_totals(book, today)
         book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
         return book
     lv = idea.get("levels") or {}
@@ -1672,8 +1687,8 @@ def fx_update_paper(top, tape):
         "tape": buyers,
     }
     save_fx_paper(book)
-    book["cumulative"] = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
     book["skipped"] = None
+    fx_totals(book, today)
     book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
     return book
 
@@ -1899,7 +1914,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "count": len(ranked),
                 "market": tape,
                 "paper": paper,
-                "note": "Paper every 15 min while /fx.html is open, 08:00–20:00 +04.",
+                "note": "Paper 05:00–15:00 Muscat while /fx.html is open. Hold to SL/TP.",
             })
 
         if path == "/api/fx/paper":
@@ -1914,10 +1929,7 @@ class Handler(SimpleHTTPRequestHandler):
                     op["live_pips"] = op["live_pct"]
                     book["open"] = op
                     save_fx_paper(book)
-            closed = round(sum((t.get("pips") if t.get("pips") is not None else 0) for t in book.get("trades") or []), 1)
-            live = (book.get("open") or {}).get("live_pips") or (book.get("open") or {}).get("live_pct") or 0
-            book["cumulative"] = round(closed + live, 1)
-            book["closed_count"] = len(book.get("trades") or [])
+            fx_totals(book)
             book["server_local"] = user_now().strftime("%Y-%m-%d %H:%M +04")
             return self._json(book)
 
