@@ -1947,9 +1947,12 @@ class Handler(SimpleHTTPRequestHandler):
             self.path = "/fx-history.html"
             return super().do_GET()
 
-        if path == "/" or path == "/index.html":
+        if path == "/" or path == "/intro.html":
+            self.path = "/intro.html"
+            return super().do_GET()
+        if path == "/index.html" or path == "/screen":
             self.path = "/index.html"
-        return super().do_GET()
+            return super().do_GET()
 
 
 def main():
