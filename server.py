@@ -18,6 +18,84 @@ STATIC = ROOT / "static"
 CACHE = ROOT / "cache"
 CACHE.mkdir(exist_ok=True)
 UNIVERSE = STATIC / "universe.json"
+
+def _drive_token():
+    raw = os.environ.get("GDRIVE_SA_JSON") or ""
+    if not raw or not os.environ.get("GDRIVE_FOLDER_ID"):
+        return None
+    try:
+        from google.oauth2 import service_account
+        from google.auth.transport.requests import Request
+        info = json.loads(raw)
+        creds = service_account.Credentials.from_service_account_info(
+            info, scopes=["https://www.googleapis.com/auth/drive"]
+        )
+        creds.refresh(Request())
+        return creds.token
+    except Exception as e:
+        print("Drive auth failed:", e)
+        return None
+
+
+def _drive_call(url, token, data=None, method=None, content_type=None):
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + token)
+    if content_type:
+        req.add_header("Content-Type", content_type)
+    with urllib.request.urlopen(req, timeout=30) as res:
+        return res.read()
+
+
+def drive_load(name):
+    token = _drive_token()
+    folder = os.environ.get("GDRIVE_FOLDER_ID")
+    if not token:
+        return None
+    q = urllib.parse.quote(f"name='{name}' and '{folder}' in parents and trashed=false")
+    listed = json.loads(_drive_call(
+        f"https://www.googleapis.com/drive/v3/files?q={q}&fields=files(id,name)", token
+    ))
+    files = listed.get("files") or []
+    if not files:
+        return None
+    body = _drive_call(
+        f"https://www.googleapis.com/drive/v3/files/{files[0]['id']}?alt=media", token
+    )
+    return json.loads(body.decode())
+
+
+def drive_save(name, obj):
+    token = _drive_token()
+    folder = os.environ.get("GDRIVE_FOLDER_ID")
+    if not token:
+        return False
+    payload = json.dumps(obj).encode()
+    q = urllib.parse.quote(f"name='{name}' and '{folder}' in parents and trashed=false")
+    listed = json.loads(_drive_call(
+        f"https://www.googleapis.com/drive/v3/files?q={q}&fields=files(id,name)", token
+    ))
+    files = listed.get("files") or []
+    if files:
+        _drive_call(
+            f"https://www.googleapis.com/upload/drive/v3/files/{files[0]['id']}?uploadType=media",
+            token, data=payload, method="PATCH", content_type="application/json",
+        )
+    else:
+        meta = json.dumps({"name": name, "parents": [folder]}).encode()
+        boundary = "barakahbound"
+        body = (
+            f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
+            + meta + b"\r\n"
+            + f"--{boundary}\r\nContent-Type: application/json\r\n\r\n".encode()
+            + payload + b"\r\n"
+            + f"--{boundary}--".encode()
+        )
+        _drive_call(
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+            token, data=body, method="POST",
+            content_type="multipart/related; boundary=" + boundary,
+        )
+    return True
 PAPER = CACHE / "paper.json"
 FX_PAPER = CACHE / "fx-paper.json"
 SHARES = 100  # paper size per theoretical open
@@ -443,6 +521,9 @@ def fetch_ohlc(symbol: str, tf: str = "1d"):
 
 
 def load_paper():
+    remote = drive_load("stock-trades.json")
+    if isinstance(remote, dict):
+        return remote
     path = PAPER if PAPER.exists() else (STATIC / "paper.json")
     if not path.exists():
         return {"trades": [], "open": None}
@@ -459,6 +540,10 @@ def save_paper(data):
         (STATIC / "paper.json").write_text(text, encoding="utf-8")
     except Exception:
         pass
+    try:
+        drive_save("stock-trades.json", data)
+    except Exception as e:
+        print("Drive stock save failed:", e)
 
 
 def et_now():
@@ -1486,6 +1571,9 @@ def fx_tape():
 
 
 def load_fx_paper():
+    remote = drive_load("fx-trades.json")
+    if isinstance(remote, dict):
+        return remote
     path = FX_PAPER if FX_PAPER.exists() else (STATIC / "fx-paper.json")
     if not path.exists():
         return {"trades": [], "open": None}
@@ -1500,10 +1588,24 @@ def save_fx_paper(data):
     FX_PAPER.write_text(text, encoding="utf-8")
     try:
         (STATIC / "fx-paper.json").write_text(text, encoding="utf-8")
-        week = STATIC / ("fx-paper-" + datetime.now(timezone.utc).strftime("%Y-W%W") + ".json")
-        week.write_text(text, encoding="utf-8")
+        days = STATIC / "fx-days"
+        days.mkdir(exist_ok=True)
+        by = {}
+        for t in data.get("trades") or []:
+            by.setdefault(t.get("date") or "unknown", []).append(t)
+        index = []
+        for day, rows in by.items():
+            pips = round(sum((r.get("pips") or 0) for r in rows), 1)
+            (days / f"{day}.json").write_text(json.dumps({"date": day, "trades": rows, "pips": pips}, indent=2), encoding="utf-8")
+            index.append({"date": day, "trades": len(rows), "pips": pips})
+        index.sort(key=lambda x: x["date"], reverse=True)
+        (days / "index.json").write_text(json.dumps(index, indent=2), encoding="utf-8")
     except Exception:
         pass
+    try:
+        drive_save("fx-trades.json", data)
+    except Exception as e:
+        print("Drive fx save failed:", e)
 
 
 def fx_slot_now(now):
@@ -1916,6 +2018,16 @@ class Handler(SimpleHTTPRequestHandler):
                 "paper": paper,
                 "note": "Paper 05:00–15:00 Muscat while /fx.html is open. Hold to SL/TP.",
             })
+
+        if path == "/api/fx/days":
+            idx = STATIC / "fx-days" / "index.json"
+            days = []
+            if idx.exists():
+                try:
+                    days = json.loads(idx.read_text(encoding="utf-8"))
+                except Exception:
+                    days = []
+            return self._json({"ok": True, "days": days})
 
         if path == "/api/fx/paper":
             book = load_fx_paper()

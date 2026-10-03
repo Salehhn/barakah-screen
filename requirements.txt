@@ -1,1 +1,2 @@
-# stdlib only — no pip packages required
+google-auth
+requests
