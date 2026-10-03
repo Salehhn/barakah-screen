@@ -23,11 +23,13 @@
   <header>
     <div class="brand">Tape history</div>
     <nav>
-      <a href="/fx.html">Metals / FX / Oil</a>
-      <a href="/fx-history.html">Historical trades</a>
+      <a href="/">Halal screen</a>
       <a href="/ideas.html">Stock ideas</a>
+      <a href="/history.html">Stock history</a>
+      <a href="/fx.html">FX / metals</a>
+      <a href="/fx-history.html">FX history</a>
     </nav>
-    <p class="meta">Paper 05:00–15:00 Muscat while /fx.html is open. Daily pips reset at midnight Muscat; total keeps all days.</p>
+    <p class="meta">Paper 05:00–15:00 Muscat. Today resets at midnight. Total is kept in this browser if Render restarts.</p>
   </header>
   <main>
     <div class="stat" id="count">Trades: 0</div>
@@ -37,55 +39,53 @@
   </main>
 <script>
 function n(x,d){ if(x==null||Number.isNaN(Number(x))) return "—"; return Number(x).toFixed(d); }
+function keyOf(t){ return [t.date, t.slot, t.symbol, t.side, t.open_price].join("|"); }
+function loadLocal(){ try { return JSON.parse(localStorage.getItem("fxPaperTrades")||"[]"); } catch(e){ return []; } }
+function saveLocal(rows){ localStorage.setItem("fxPaperTrades", JSON.stringify(rows.slice(-400))); }
+function merge(serverRows){
+  const map = {};
+  loadLocal().forEach(t => { if(t&&t.symbol) map[keyOf(t)] = t; });
+  (serverRows||[]).forEach(t => { if(t&&t.symbol) map[keyOf(t)] = t; });
+  const all = Object.values(map).sort((a,b)=> String(a.date||"").localeCompare(String(b.date||"")) || String(a.slot||"").localeCompare(String(b.slot||"")));
+  saveLocal(all);
+  return all;
+}
 function paint(p){
   const op = p.open;
-  const rows = (p.trades||[]).slice().reverse();
-  const nClosed = p.closed_count != null ? p.closed_count : rows.length;
-  const nOpen = op ? 1 : 0;
-  document.getElementById("count").textContent = "Trades listed: " + (nClosed + nOpen) + "  (closed " + nClosed + (nOpen?" + 1 open":"") + ")";
+  const rows = merge(p.trades||[]).slice().reverse();
+  const today = p.today || (p.server_local||"").slice(0,10);
+  const closedPips = rows.reduce((a,t)=> a + (t.pips!=null?Number(t.pips):0), 0);
+  const dayClosed = rows.filter(t=>t.date===today).reduce((a,t)=> a + (t.pips!=null?Number(t.pips):0), 0);
+  const live = op && op.live_pips != null ? Number(op.live_pips) : 0;
+  const day = dayClosed + (op && op.date===today ? live : 0);
+  const cum = closedPips + (op ? live : 0);
+  document.getElementById("count").textContent = "Trades listed: " + (rows.length + (op?1:0)) + " · kept in this browser";
   if (op) {
-    const live = op.live_pips != null ? Number(op.live_pips) : 0;
     const cls = live>=0?"win":"loss";
     document.getElementById("open").innerHTML = `<div class="openbox">
       <b>Open now</b> ${op.side} ${op.name||op.symbol} · slot ${op.slot||""} ${op.date||""}<br>
       open ${op.open_price} · last ${op.last} · TP1 ${op.tp1} · SL ${op.stop}<br>
       Live <span class="${cls}">${live>=0?"+":""}${n(live,1)} pips</span>
     </div>`;
-  } else {
-    document.getElementById("open").innerHTML = "";
-  }
+  } else document.getElementById("open").innerHTML = "";
   if (!rows.length && !op) {
     document.getElementById("log").textContent = "No trades yet. Keep /fx.html open 05:00–15:00 Muscat.";
     document.getElementById("cum").textContent = "Today 0 pips · Total 0 pips";
     return;
   }
   document.getElementById("log").innerHTML = `<table>
-    <thead><tr>
-      <th>#</th><th>Date</th><th>Slot</th><th>Market</th><th>Side</th>
-      <th>Open</th><th>Close</th><th>Exit</th><th>Pips</th>
-    </tr></thead>
+    <thead><tr><th>#</th><th>Date</th><th>Slot</th><th>Market</th><th>Side</th><th>Open</th><th>Close</th><th>Exit</th><th>Pips</th></tr></thead>
     <tbody>${rows.map((t,i)=>{
       const pts = t.pips != null ? Number(t.pips) : 0;
       const cls = pts>=0?"win":"loss";
-      return `<tr>
-        <td>${rows.length-i}</td>
-        <td>${t.date||""}</td>
-        <td>${t.slot!=null?t.slot:""}</td>
-        <td><b>${t.name||t.symbol}</b> <span class="meta">${t.group||""}</span></td>
-        <td class="${t.side}">${t.side||""}</td>
-        <td>${t.open_price??""}</td>
-        <td>${t.close_price??""}</td>
-        <td>${t.exit||""}</td>
-        <td class="${cls}">${pts>=0?"+":""}${n(pts,1)} pips</td>
-      </tr>`;
+      return `<tr><td>${rows.length-i}</td><td>${t.date||""}</td><td>${t.slot!=null?t.slot:""}</td>
+        <td><b>${t.name||t.symbol}</b></td><td class="${t.side}">${t.side||""}</td>
+        <td>${t.open_price??""}</td><td>${t.close_price??""}</td><td>${t.exit||""}</td>
+        <td class="${cls}">${pts>=0?"+":""}${n(pts,1)} pips</td></tr>`;
     }).join("")}</tbody></table>`;
-  const cum = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pips!=null?t.pips:0),0);
-  const day = p.daily_cumulative != null ? p.daily_cumulative : 0;
-  const ccls = cum>=0?"win":"loss";
-  const dcls = day>=0?"win":"loss";
-  document.getElementById("cum").innerHTML = `Today <span class="${dcls}"><b>${day>=0?"+":""}${n(day,1)} pips</b></span>
-    &nbsp;·&nbsp; Total <span class="${ccls}"><b>${cum>=0?"+":""}${n(cum,1)} pips</b></span>
-    <div class="meta">${p.server_local||""} · ${p.today||""} · includes open trade</div>`;
+  document.getElementById("cum").innerHTML = `Today <span class="${day>=0?"win":"loss"}"><b>${day>=0?"+":""}${n(day,1)} pips</b></span>
+    &nbsp;·&nbsp; Total <span class="${cum>=0?"win":"loss"}"><b>${cum>=0?"+":""}${n(cum,1)} pips</b></span>
+    <div class="meta">${p.server_local||""} · host restart will not zero this browser</div>`;
 }
 async function tick(){
   try { paint(await fetch("/api/fx/paper?v=pips&_="+Date.now()).then(r=>r.json())); }

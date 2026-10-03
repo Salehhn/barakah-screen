@@ -32,8 +32,10 @@
     <div class="brand">Historical trades</div>
     <nav>
       <a href="/">Halal screen</a>
-      <a href="/ideas.html">Buy setups</a>
-      <a href="/history.html">Historical trades</a>
+      <a href="/ideas.html">Stock ideas</a>
+      <a href="/history.html">Stock history</a>
+      <a href="/fx.html">FX / metals</a>
+      <a href="/fx-history.html">FX history</a>
     </nav>
     <p class="meta">Paper log only — 100 shares of the top Ideas name when the tape is healthy in US cash hours. Not a broker fill.</p>
   </header>
@@ -45,16 +47,27 @@
 <script>
 function money(n){ if(n==null||Number.isNaN(n)) return "—"; return (n<0?"-":"") + "$" + Math.abs(n).toFixed(2); }
 function pts(n){ if(n==null||Number.isNaN(n)) return "—"; return (n>=0?"+":"") + Number(n).toFixed(2); }
-fetch("/api/paper?_="+Date.now()).then(r=>r.json()).then(p=>{
+function keyOf(t){ return [t.date, t.symbol, t.open_price, t.exit].join("|"); }
+function loadLocal(){ try { return JSON.parse(localStorage.getItem("stockPaperTrades")||"[]"); } catch(e){ return []; } }
+function saveLocal(rows){ localStorage.setItem("stockPaperTrades", JSON.stringify(rows.slice(-400))); }
+function merge(serverRows){
+  const map = {};
+  loadLocal().forEach(t => { if(t&&t.symbol) map[keyOf(t)] = t; });
+  (serverRows||[]).forEach(t => { if(t&&t.symbol) map[keyOf(t)] = t; });
+  const all = Object.values(map).sort((a,b)=> String(a.date||"").localeCompare(String(b.date||"")));
+  saveLocal(all);
+  return all;
+}
+function paint(p){
   const op = p.open;
+  const rows = merge(p.trades||[]).slice().reverse();
   if (op) {
     document.getElementById("open").innerHTML = `<div class="openbox">
       <b>Open now</b> ${op.symbol} · opened ${op.date||""} ${op.opened_at||""}
       · open ${money(op.open_price)} · last ${money(op.last)}
       · TP1 ${money(op.tp1)} · SL ${money(op.stop)}
     </div>`;
-  }
-  const rows = (p.trades||[]).slice().reverse();
+  } else document.getElementById("open").innerHTML = "";
   if (!rows.length && !op) {
     document.getElementById("log").textContent = "No paper trades yet. Leave Ideas open during 09:28–15:55 ET.";
     document.getElementById("cum").textContent = "Cumulative points 0 · $0";
@@ -80,12 +93,17 @@ fetch("/api/paper?_="+Date.now()).then(r=>r.json()).then(p=>{
     }).join("")}</tbody>
   </table>`;
   const cumP = rows.reduce((a,t)=>a+((t.close_price||0)-(t.open_price||0)),0);
-  const cum$ = p.cumulative != null ? p.cumulative : rows.reduce((a,t)=>a+(t.pnl||0),0);
+  const cum$ = rows.reduce((a,t)=>a+(t.pnl||0),0);
   document.getElementById("cum").innerHTML =
-    `Cumulative points <b>${pts(cumP)}</b> &nbsp;·&nbsp; Cumulative $ <b>${money(cum$)}</b>`;
-}).catch(e=>{
-  document.getElementById("log").textContent = "Could not load log: "+e;
-});
+    `Cumulative points <b>${pts(cumP)}</b> &nbsp;·&nbsp; Cumulative $ <b>${money(cum$)}</b>
+     <div class="meta">Kept in this browser if the host restarts</div>`;
+}
+async function tick(){
+  try { paint(await fetch("/api/paper?_="+Date.now()).then(r=>r.json())); }
+  catch(e){ document.getElementById("log").textContent = "Could not load log: "+e; }
+}
+tick();
+setInterval(tick, 20000);
 </script>
 </body>
 </html>
