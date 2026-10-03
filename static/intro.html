@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Barakah</title>
+  <link rel="icon" href="/icon.svg" />
+  <style>
+    :root { --bg:#071018; --gold:#d4b46a; --gold2:#f6e3b0; --mint:#7dcaa8; --text:#e8eef0; --muted:#8aa0b0; }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; min-height:100vh; color:var(--text);
+      font-family: system-ui, sans-serif;
+      background:
+        radial-gradient(700px 380px at 50% -10%, #1c3a32 0%, transparent 55%),
+        radial-gradient(500px 280px at 90% 90%, #243044 0%, transparent 50%),
+        var(--bg);
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      padding:28px 16px 48px;
+    }
+    h1 { margin:0; font-size:34px; color:var(--gold2); letter-spacing:.04em; }
+    .sub { color:var(--muted); margin:8px 0 28px; text-align:center; max-width:420px; }
+    .grid {
+      display:flex; flex-wrap:wrap; justify-content:center; gap:22px;
+      max-width:720px;
+    }
+    a.orb {
+      width:132px; text-decoration:none; color:var(--text); text-align:center;
+    }
+    .ring {
+      width:112px; height:112px; margin:0 auto 10px; border-radius:50%;
+      display:flex; align-items:center; justify-content:center;
+      background: radial-gradient(circle at 35% 30%, #2a4158, #101c28 70%);
+      border: 2px solid var(--gold);
+      box-shadow: 0 0 0 6px rgba(212,180,106,.12), 0 12px 28px rgba(0,0,0,.35);
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    a.orb:hover .ring, a.orb:focus .ring {
+      transform: translateY(-4px) scale(1.04);
+      box-shadow: 0 0 0 8px rgba(125,202,168,.16), 0 16px 32px rgba(0,0,0,.4);
+    }
+    .ring svg { width:54px; height:54px; }
+    .lab { font-weight:650; font-size:14px; }
+    .hint { display:block; color:var(--muted); font-size:11px; margin-top:2px; }
+    footer { margin-top:28px; color:#5d7384; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h1>Barakah</h1>
+  <p class="sub">Choose a desk. One tap opens it. The arrow on that page brings you back here.</p>
+  <div class="grid">
+    <a class="orb" href="/index.html">
+      <div class="ring" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" stroke="#f0d9a0" stroke-width="2.4">
+          <path d="M18 46V28l14-10 14 10v18" />
+          <path d="M26 46V34h12v12" />
+          <circle cx="32" cy="18" r="3" fill="#7dcaa8" stroke="none"/>
+        </svg>
+      </div>
+      <div class="lab">Halal screen</div>
+      <span class="hint">ETF universe</span>
+    </a>
+    <a class="orb" href="/ideas.html">
+      <div class="ring">
+        <svg viewBox="0 0 64 64" fill="none" stroke="#7dcaa8" stroke-width="2.4">
+          <path d="M12 46h40" />
+          <path d="M16 40l10-12 8 6 14-16" />
+          <path d="M40 18h8v8" />
+        </svg>
+      </div>
+      <div class="lab">Stock ideas</div>
+      <span class="hint">Ranked buys</span>
+    </a>
+    <a class="orb" href="/history.html">
+      <div class="ring">
+        <svg viewBox="0 0 64 64" fill="none" stroke="#f0d9a0" stroke-width="2.4">
+          <rect x="16" y="12" width="32" height="40" rx="3"/>
+          <path d="M24 24h16M24 32h16M24 40h10" />
+        </svg>
+      </div>
+      <div class="lab">Stock history</div>
+      <span class="hint">Paper log</span>
+    </a>
+    <a class="orb" href="/fx.html">
+      <div class="ring">
+        <svg viewBox="0 0 64 64" fill="none" stroke="#d4b46a" stroke-width="2.4">
+          <ellipse cx="32" cy="34" rx="16" ry="8"/>
+          <path d="M16 34v8c0 4 7 8 16 8s16-4 16-8v-8" />
+          <path d="M32 18v6M28 20h8" />
+        </svg>
+      </div>
+      <div class="lab">FX / metals</div>
+      <span class="hint">Buy or sell</span>
+    </a>
+    <a class="orb" href="/fx-history.html">
+      <div class="ring">
+        <svg viewBox="0 0 64 64" fill="none" stroke="#7dcaa8" stroke-width="2.4">
+          <circle cx="32" cy="34" r="14"/>
+          <path d="M32 26v9l6 4" />
+          <path d="M24 16h16" />
+        </svg>
+      </div>
+      <div class="lab">FX history</div>
+      <span class="hint">Pips log</span>
+    </a>
+  </div>
+  <footer>Educational screen. Not a fatwa and not a broker.</footer>
+</body>
+</html>
