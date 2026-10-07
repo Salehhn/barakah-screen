@@ -104,8 +104,8 @@ FX_BOOK = [
     {"symbol": "XAUUSD=X", "tv": "XAUUSD", "name": "Gold", "group": "Metal", "pip": 0.01},
     {"symbol": "XAGUSD=X", "tv": "XAGUSD", "name": "Silver", "group": "Metal", "pip": 0.01},
     {"symbol": "EURJPY=X", "tv": "EURJPY", "name": "EUR/JPY", "group": "Forex", "pip": 0.01},
-    {"symbol": "PL=F", "tv": "XPTUSD", "name": "Platinum", "group": "Metal", "pip": 0.10},
-    {"symbol": "CL=F", "tv": "USOIL", "name": "WTI Oil", "group": "Oil", "pip": 0.01},
+    {"symbol": "XAUEUR=X", "tv": "XAUEUR", "name": "Gold/EUR", "group": "Metal", "pip": 0.01},
+    {"symbol": "SI=F", "tv": "XAGUSD", "name": "Silver fut", "group": "Metal", "pip": 0.01},
     {"symbol": "BZ=F", "tv": "UKOIL", "name": "Brent Oil", "group": "Oil", "pip": 0.01},
     {"symbol": "EURUSD=X", "tv": "EURUSD", "name": "EUR/USD", "group": "Forex", "pip": 0.0001},
     {"symbol": "GBPUSD=X", "tv": "GBPUSD", "name": "GBP/USD", "group": "Forex", "pip": 0.0001},
@@ -559,86 +559,74 @@ def paper_cum(trades):
 
 
 def update_paper_with_top(top, market):
-    """If tape healthy near the US open and no trade today, paper-buy #1. Else mark TP/EOD."""
+    """Up to 3 different stocks a day. No stop. Close on TP1 or next session open."""
     book = load_paper()
     now = et_now()
     today = now.strftime("%Y-%m-%d")
     hour, minute = now.hour, now.minute
     buyers = (market or {}).get("buyers") or 0
-    pos = book.get("open")
-
-    if pos:
+    opens = book.get("opens") or []
+    if book.get("open") and not opens:
+        opens = [book["open"]]
+    still = []
+    for pos in opens:
         q = yahoo_price(pos["symbol"])
         last = q.get("price")
+        hit = None
         if last is not None:
             pos["last"] = last
             tp = pos.get("tp1")
-            sl = pos.get("stop")
-            hit = None
             if tp and last >= tp:
                 hit = "TP1"
-            elif sl and last <= sl:
-                hit = "SL"
-            elif hour >= 16:
-                hit = "EOD"
-            if hit:
-                pnl = round((last - pos["open_price"]) * pos.get("shares", SHARES), 2)
-                book["trades"].append({
-                    "symbol": pos["symbol"],
-                    "date": pos["date"],
-                    "open_price": pos["open_price"],
-                    "close_price": last,
-                    "exit": hit,
-                    "pnl": pnl,
-                    "shares": pos.get("shares", SHARES),
-                })
-                book["open"] = None
-            else:
-                book["open"] = pos
-        save_paper(book)
-        book["cumulative"] = paper_cum(book["trades"])
-        return book
-
-    already = any(t.get("date") == today for t in book.get("trades") or [])
+            elif pos.get("date") and pos["date"] < today and (hour > 9 or (hour == 9 and minute >= 30)):
+                hit = "NEXT_OPEN"
+        if hit and last is not None:
+            pnl = round((last - pos["open_price"]) * pos.get("shares", SHARES), 2)
+            book.setdefault("trades", []).append({
+                "symbol": pos["symbol"], "date": pos["date"], "open_price": pos["open_price"],
+                "close_price": last, "exit": hit, "pnl": pnl, "shares": pos.get("shares", SHARES),
+            })
+        else:
+            still.append(pos)
+    book["opens"] = still
+    book["open"] = still[0] if still else None
     weekday = now.weekday() < 5
     mins = hour * 60 + minute
-    in_open_window = weekday and (9 * 60 + 28) <= mins <= (15 * 60 + 55)
+    # Skip the first 30 minutes. Three windows so entries are spread.
+    windows = [(10 * 60, 11 * 60 + 30), (12 * 60, 13 * 60 + 30), (14 * 60, 15 * 60 + 30)]
+    window_i = next((i for i, (a, b) in enumerate(windows) if a <= mins <= b), None)
+    held = {p.get("symbol") for p in still}
+    opened_today = {t.get("symbol") for t in book.get("trades") or [] if t.get("date") == today}
     book["server_et"] = now.strftime("%Y-%m-%d %H:%M ET")
-    if already or not in_open_window or buyers < 60 or not top:
-        book["cumulative"] = paper_cum(book.get("trades") or [])
-        if already:
-            why = "already paper-traded today"
-        elif not weekday:
-            why = "US market closed (weekend)"
-        elif not in_open_window:
-            why = f"outside cash hours — server clock {book['server_et']} (need 09:28–15:55 ET)"
-        elif buyers < 60:
-            why = f"tape not healthy (buyers {buyers} < 60)"
+    if weekday and window_i is not None and buyers >= 60 and len(still) < 3 and top:
+        used_windows = {p.get("window") for p in still if p.get("date") == today}
+        if window_i not in used_windows:
+            idea = next((x for x in top if x.get("symbol") and x.get("symbol") not in held and x.get("symbol") not in opened_today), None)
+            px = (idea or {}).get("price") or (((idea or {}).get("levels") or {}).get("entry"))
+            if idea and px:
+                lv = idea.get("levels") or {}
+                still.append({
+                    "symbol": idea.get("symbol"), "date": today, "open_price": float(px),
+                    "tp1": lv.get("tp1"), "shares": SHARES, "last": float(px),
+                    "opened_at": now.strftime("%H:%M ET"), "window": window_i,
+                })
+                book["opens"] = still
+                book["open"] = still[0]
+                book["skipped"] = None
+            else:
+                book["skipped"] = "no fresh name in this window"
         else:
-            why = "no top name"
-        book["skipped"] = why
-        return book
-
-    idea = top[0]
-    px = idea.get("price") or ((idea.get("levels") or {}).get("entry"))
-    if not px:
-        book["cumulative"] = paper_cum(book.get("trades") or [])
-        book["skipped"] = "no price on top name"
-        return book
-    lv = idea.get("levels") or {}
-    book["open"] = {
-        "symbol": idea.get("symbol"),
-        "date": today,
-        "open_price": float(px),
-        "tp1": lv.get("tp1"),
-        "stop": lv.get("stop"),
-        "shares": SHARES,
-        "last": float(px),
-        "opened_at": now.strftime("%H:%M ET"),
-    }
+            book["skipped"] = "this time window already used"
+    elif len(still) >= 3:
+        book["skipped"] = "3 positions open"
+    elif not weekday:
+        book["skipped"] = "US market closed (weekend)"
+    elif window_i is None:
+        book["skipped"] = f"outside 10:00–11:30, 12:00–13:30, 14:00–15:30 ET — {book['server_et']}"
+    elif buyers < 60:
+        book["skipped"] = f"tape not healthy (buyers {buyers} < 60)"
     save_paper(book)
     book["cumulative"] = paper_cum(book.get("trades") or [])
-    book["skipped"] = None
     return book
 
 
@@ -1609,7 +1597,7 @@ def save_fx_paper(data):
 
 
 def fx_slot_now(now):
-    daytime = 5 <= now.hour < 15
+    daytime = 5 <= now.hour < 20
     qmin = (now.minute // 15) * 15
     slot_id = f"{now.strftime('%Y-%m-%d')}-{now.hour:02d}{qmin:02d}"
     slot_label = f"{now.hour:02d}:{qmin:02d}"
@@ -1661,11 +1649,11 @@ def fx_totals(book, today=None):
     total = sum((t.get("pips") if t.get("pips") is not None else 0) for t in trades)
     daily = sum((t.get("pips") if t.get("pips") is not None else 0) for t in trades if t.get("date") == today)
     op = book.get("open") or {}
-    live = op.get("live_pips") if op.get("live_pips") is not None else (op.get("live_pct") or 0)
-    if op:
+    opens = book.get("opens") or ([op] if op else [])
+    live = sum((p.get("live_pips") or 0) for p in opens)
+    if opens:
         total += live
-        if op.get("date") == today:
-            daily += live
+        daily += sum((p.get("live_pips") or 0) for p in opens if p.get("date") == today)
     book["cumulative"] = round(total, 1)
     book["daily_cumulative"] = round(daily, 1)
     book["closed_count"] = len(trades)
@@ -1674,127 +1662,85 @@ def fx_totals(book, today=None):
 
 
 def fx_update_paper(top, tape):
-    """Paper while /fx.html is open, 05:00–15:00 Muscat (+04). Hold to SL/TP."""
+    """05:00–20:00 Muscat. Up to 3 names scored >= 80. Exit TP1, flip, or 20:00. No stop."""
     book = load_fx_paper()
     now = user_now()
     today = now.strftime("%Y-%m-%d")
     hour = now.hour
     daytime, slot_id, slot_label = fx_slot_now(now)
-    pos = book.get("open")
+    opens = book.get("opens") or []
+    if book.get("open") and not opens:
+        opens = [book["open"]]
+    by_rank = {x.get("symbol"): x for x in (top or [])}
 
     def close_pos(pos, last, why):
         signed = 1 if pos.get("side") == "BUY" else -1
         move = signed * (last - pos["open_price"])
         pips = to_pips(pos.get("symbol"), move)
-        pct = move / pos["open_price"] * 100 if pos.get("open_price") else 0
-        book["trades"].append({
-            "symbol": pos["symbol"],
-            "name": pos.get("name"),
-            "group": pos.get("group"),
-            "side": pos.get("side"),
-            "date": pos.get("date"),
-            "slot": pos.get("slot"),
-            "slot_id": pos.get("slot_id"),
-            "open_price": pos["open_price"],
-            "close_price": last,
-            "exit": why,
-            "points": pips,
-            "pips": pips,
-            "pct": round(pct, 3),
-            "pnl": pips,
+        book.setdefault("trades", []).append({
+            "symbol": pos["symbol"], "name": pos.get("name"), "group": pos.get("group"),
+            "side": pos.get("side"), "date": pos.get("date"), "slot": pos.get("slot"),
+            "slot_id": pos.get("slot_id"), "open_price": pos["open_price"],
+            "close_price": last, "exit": why, "points": pips, "pips": pips, "pnl": pips,
         })
-        book["open"] = None
 
-    if pos:
+    still = []
+    for pos in opens:
         q = yahoo_price(pos["symbol"])
         last = q.get("price")
+        hit = None
         if last is not None:
             pos["last"] = last
-            tp, sl, side = pos.get("tp1"), pos.get("stop"), pos.get("side")
-            hit = None
-            if side == "BUY":
-                if tp and last >= tp:
-                    hit = "TP1"
-                elif sl and last <= sl:
-                    hit = "SL"
-            else:
-                if tp and last <= tp:
-                    hit = "TP1"
-                elif sl and last >= sl:
-                    hit = "SL"
-            # Hold until TP/SL, a +10 side flip on this symbol, or end of day — not every 15 min.
-            if top:
-                idea = top[0]
-                if idea.get("symbol") == pos.get("symbol") and idea.get("side") in ("BUY", "SELL"):
-                    if idea.get("side") != pos.get("side"):
-                        other = idea.get("sell_score") if pos.get("side") == "BUY" else idea.get("buy_score")
-                        mine = idea.get("buy_score") if pos.get("side") == "BUY" else idea.get("sell_score")
-                        if other is not None and mine is not None and other >= (mine or 0) + 10:
-                            hit = "FLIP"
-                # different #1: keep holding current until SL/TP
-            if (not daytime) or hour >= 15:
+            tp, side = pos.get("tp1"), pos.get("side")
+            if side == "BUY" and tp and last >= tp:
+                hit = "TP1"
+            elif side == "SELL" and tp and last <= tp:
+                hit = "TP1"
+            idea = by_rank.get(pos.get("symbol"))
+            if idea and idea.get("side") in ("BUY", "SELL") and idea.get("side") != pos.get("side"):
+                other = idea.get("sell_score") if pos.get("side") == "BUY" else idea.get("buy_score")
+                mine = idea.get("buy_score") if pos.get("side") == "BUY" else idea.get("sell_score")
+                if other is not None and mine is not None and other >= (mine or 0) + 10:
+                    hit = "FLIP"
+            if hour >= 20:
                 hit = hit or "EOD"
-            if hit:
-                close_pos(pos, last, hit)
-            else:
-                pos["live_pct"] = fx_mark(pos, last)
-                pos["live_pips"] = pos["live_pct"]
-                book["open"] = pos
-        save_fx_paper(book)
-        fx_totals(book, today)
-        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
-        return book
-
-    done = any(t.get("slot_id") == slot_id for t in book.get("trades") or [])
-    buyers = (tape or {}).get("buyers") or 50
-    if not daytime:
-        book["skipped"] = f"outside 05:00–15:00 Muscat — clock {now.strftime('%H:%M +04')}"
-        fx_totals(book, today)
-        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
-        return book
-    if done:
-        book["skipped"] = f"already logged slot {slot_label} +04"
-        fx_totals(book, today)
-        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
-        return book
-    if not top:
-        book["skipped"] = "no ranked market"
-        fx_totals(book, today)
-        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
-        return book
-    idea = next((x for x in top if x.get("side") in ("BUY", "SELL") and (x.get("score") or 0) >= 58), None)
-    if not idea:
-        book["skipped"] = "no clear side (no-trade band or score < 58)"
-        fx_totals(book, today)
-        book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
-        return book
-    lv = idea.get("levels") or {}
-    px = idea.get("price") or lv.get("entry")
-    book["open"] = {
-        "symbol": idea["symbol"],
-        "tv": idea.get("tv"),
-        "name": idea.get("name"),
-        "group": idea.get("group"),
-        "side": idea.get("side"),
-        "date": today,
-        "slot": slot_label,
-        "slot_id": slot_id,
-        "open_price": float(px),
-        "tp1": lv.get("tp1"),
-        "stop": lv.get("stop"),
-        "last": float(px),
-        "live_pct": 0,
-        "live_pips": 0,
-        "opened_at": now.strftime("%H:%M +04"),
-        "tape": buyers,
-    }
+            pos["live_pips"] = fx_mark(pos, last)
+        if hit and last is not None:
+            close_pos(pos, last, hit)
+        else:
+            still.append(pos)
+    held = {p.get("symbol") for p in still}
+    if daytime and len(still) < 3:
+        for idea in top or []:
+            if len(still) >= 3:
+                break
+            if idea.get("symbol") in held:
+                continue
+            if idea.get("side") not in ("BUY", "SELL") or (idea.get("score") or 0) < 80:
+                continue
+            if (idea.get("rank") or 99) > 3:
+                continue
+            lv = idea.get("levels") or {}
+            px = idea.get("price") or lv.get("entry")
+            if not px:
+                continue
+            still.append({
+                "symbol": idea["symbol"], "tv": idea.get("tv"), "name": idea.get("name"),
+                "group": idea.get("group"), "side": idea.get("side"), "date": today,
+                "slot": slot_label, "slot_id": slot_id, "open_price": float(px),
+                "tp1": lv.get("tp1"), "last": float(px), "live_pips": 0,
+                "opened_at": now.strftime("%H:%M +04"), "score": idea.get("score"),
+            })
+            held.add(idea["symbol"])
+    book["opens"] = still
+    book["open"] = still[0] if still else None
+    book["skipped"] = None if daytime else f"outside 05:00–20:00 Muscat — clock {now.strftime('%H:%M +04')}"
+    if daytime and not still:
+        book["skipped"] = "no name ranked 1–3 with score >= 80"
     save_fx_paper(book)
-    book["skipped"] = None
     fx_totals(book, today)
     book["server_local"] = now.strftime("%Y-%m-%d %H:%M +04")
     return book
-
-
 def rank_fx():
     ranked = []
     for item in FX_BOOK:
